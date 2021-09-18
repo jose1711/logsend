@@ -1,0 +1,242 @@
+#!/bin/bash
+# $Id: backend-tail,v 1.3 2007/04/06 09:19:42 orveldv Exp $
+#
+# Logsend watches files and mails the additions to your 
+# e-mail address.
+#
+# Logsend is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation; either version 2 of
+# the License, or (at your option) any later version.
+#
+# Logsend is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public 
+# License along with this program; if not, write to the Free 
+# Software Foundation, Inc.,51 Franklin Street, Fifth Floor, 
+# Boston, MA 02110-1301 USA.
+#
+#
+# Copyright: 	Daniel Butzu (Orveldv) 
+# Mailto: 	orveldv at users dot sourceforge dot net
+# Homepage: 	http://logsend.sourceforge.net
+
+
+
+
+
+	# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	# Here begin the functions for the tail backend 
+	# (-) Everything happens inside a loop (lh_tail_whole) which gets 
+	# the err output from tailing the watched file (with lh_tail_reinit).
+	# (-) The function for check and action/mail (lh_check_tail) enters
+	# a loop.
+	# (-) The tail is restarted (lh_tail_reinit) when a log rotation
+	# interfered; 
+	# (-) lh_tail_whole restarting in case of truncation does not call
+	# lh_check_tail.
+	# (-) The switch for fifo (lh_tail_reinit) is changed after every
+	# lh_tail_whole restart, preventing a stale cat.
+
+
+
+
+
+	# function for checking 
+	lh_check_tail() {
+	while true
+	do
+		# wait till tail started, and till there is actually some output.
+		while [ ! -r "${LH_TAIL_OUTFILE}" ]
+		do
+			sleep 1s
+		done
+
+		# a longer sleep in the normal run allows us to collect more lines.
+		[ "${LH_LIVE_MON}" != "1" ] && sleep 5s
+
+		# wait if exists a check fnc. & announce lh_check started.
+		while true
+		do
+			( set -o noclobber; echo > "${LH_LOCK_CHECK}") 2> /dev/null && break
+		done
+
+		# take the output out of the way
+		mv "${LH_TAIL_OUTFILE}" "${LH_LOG_FILE_TO_SEND}"
+
+		# analyse this output.
+		if [ "${LH_LIVE_MON}" != "1" ] ; then
+			grep --no-filename "${LH_GREP_EXTRA_OPTS}" "${LH_GREP}" "${LH_LOG_FILE_TO_SEND}" >> "${LH_LOG_FILE_TO_SEND_MV}"
+
+			LH_DID_SEND="0"
+			# if something was found, perform the action. 
+			if [ -s "${LH_LOG_FILE_TO_SEND_MV}" ]
+			then
+				lh_action
+				LH_DID_SEND="1"
+
+			fi
+			# we won't delete this in case of live monitoring.
+			rm -f "${LH_LOG_FILE_TO_SEND_MV}"
+		else
+			grep --no-filename "${LH_GREP_EXTRA_OPTS}" "${LH_GREP}" "${LH_LOG_FILE_TO_SEND}" | fold -w "${LH_TEXT_WIDTH}" >> "${LH_LOG_FILE_TO_SEND_MV}"
+		fi
+
+		rm -f "${LH_LOG_FILE_TO_SEND}"
+
+		# announce we finished.
+		rm "${LH_LOCK_CHECK}"
+
+		[ "${LH_DID_SEND}" = "1" ] && sleep "${LH_LOG_SLEEP}" 
+
+	done
+	}
+
+
+
+	# this reinitializes tail:
+	#	1. at the beginning;
+	#	2. when a truncation occured.
+	lh_tail_reinit() {
+
+		# if there was another (old) tail running, kill it;
+		for LH_ONE_PROC_TO_KILL in ${LH_PROCS_TO_KILL} 
+		do
+			while kill -0 ${LH_ONE_PROC_TO_KILL} > /dev/null 2>&1
+			do
+				# kill this child
+				kill ${LH_ONE_PROC_TO_KILL} > /dev/null 2>&1
+			done
+		done
+
+		lh_tail_read() {
+			while true
+			do
+				read LH_TAIL_READ
+				echo "${LH_TAIL_READ}" >> "${LH_TAIL_OUTFILE}"
+			done
+		}
+
+		# preparing to start another tail.
+
+		# is it still readable?
+		while [ ! -r "${LH_LOG_FILE}" ]
+		do
+			sleep 1s
+		done
+
+		# lets hide stderr, no need to see Terminated when switching.
+		exec 6>&2 ; exec 2> /dev/null
+
+		# when get_meantime will be implemented, we will have only one tail variant. Till then:
+		if [ "${LH_FIRST_LOOP}" = "1" ] ; then
+
+			# tail the file; stderr goes to LH_TAIL_ERRFIFO for log rotation detection
+			tail ${LH_TAIL_EXTRA_OPTS} -n 0 "${LH_LOG_FILE}" 2> "${LH_TAIL_ERRFIFO}.${LH_FIFO_SWITCH}" | lh_tail_read & export LH_READ_TAIL_PID=$! 
+			LH_FIRST_LOOP="0"
+		else
+			# tail the file; stderr goes to LH_TAIL_ERRFIFO for log rotation detection
+			tail ${LH_TAIL_EXTRA_OPTS} -n +${LH_LINES} "${LH_LOG_FILE}" 2> "${LH_TAIL_ERRFIFO}.${LH_FIFO_SWITCH}" | lh_tail_read & export LH_READ_TAIL_PID=$! 
+		fi
+
+		exec 2>&6 6>&-
+
+		# write down the counter; TAIL backend will use it only for $LH_GET_MEANTIME
+		# echo "${LH_LINES}" > "${LH_WRITTEN_COUNTER}"
+	}
+
+
+
+	lh_tail_whole() {
+		lh_read_fifo() {
+			lh_tail_reinit
+
+			read ORV_TAIL_ERR			
+					
+			# an error occured, probably FILE TRUNCATION			
+
+			# preserve the old tail PID (if any) and fifo.
+			# we have to do it no matter why we restart.
+			[ -z "${LH_READ_TAIL_PID}" ] || LH_READ_TAIL_PID_OLD="${LH_READ_TAIL_PID}"
+
+			# get the parent of LH_READ_TAIL_PID_OLD; this is also the tail's parent.
+			LH_READ_PARENTS=$(ps ax --format ppid,pid,user | grep " ${LH_READ_TAIL_PID_OLD} " | awk '{ print $1 }')
+			# get the children
+			for LH_ONE_READ_PARENT in ${LH_READ_PARENTS}
+			do
+				LH_READ_CHILDREN="$(pgrep -P ${LH_ONE_READ_PARENT})"
+				LH_PROCS_TO_KILL="${LH_PROCS_TO_KILL} ${LH_READ_CHILDREN}"
+			done
+
+			# also switch the tail fifo, no matter what
+			if [ "${LH_FIFO_SWITCH}" = "0" ]
+			then
+				LH_FIFO_SWITCH="1"
+			else
+				LH_FIFO_SWITCH="0"
+			fi
+
+			# ~~~~~ TRUNCATION ~~~~~
+
+				# wait till any existing check finishes.
+				while [ -r "${LH_LOCK_CHECK}" ]
+				do
+					continue
+				done
+
+				# pass this to reinit		
+				LH_LINES="1"
+
+			# restart everything
+			lh_tail_whole &
+
+			exit 0
+		}
+		cat "${LH_TAIL_ERRFIFO}.${LH_FIFO_SWITCH}" | lh_read_fifo
+	}
+
+
+	lh_call_tail() {
+			# fifo reestablishment
+			for LH_FIFO_SWITCH in 0 1
+			do
+				rm -f "${LH_TAIL_ERRFIFO}.${LH_FIFO_SWITCH}"
+				mkfifo "${LH_TAIL_ERRFIFO}.${LH_FIFO_SWITCH}"
+			done
+
+			# outfile cleanup	
+			rm -f "${LH_TAIL_OUTFILE}"
+			
+			# this switch redirects stderr of a new tail to a
+			# different fifo, preventing a stale cat
+			LH_FIFO_SWITCH="0"
+
+			# touch "${LH_TAIL_OUTFILE}"
+			# lh_get_meantime_pre
+
+			# we avoid any wc -l to gain speed. Also, this is a good idea for the live monitor.
+				# move needed by tail_reinit
+				# LH_LINES=$(wc -l "${LH_LOG_FILE}" | awk '{ print $1 }')
+				# we start next to the last line added.
+				# LH_LINES=$((${LH_LINES}+1))
+
+			LH_FIRST_LOOP="1"
+
+			# always running in the background.
+			lh_check_tail &			
+
+			lh_tail_whole 
+
+			exit 0
+	}
+
+
+
+
+
+# -------------------------------------
+# prefix section
+

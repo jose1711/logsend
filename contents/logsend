@@ -1,0 +1,732 @@
+#!/bin/bash
+# $Id: logsend,v 0.7 2007/04/06 09:19:44 orveldv Exp $
+#
+# Logsend watches files and mails the additions to your 
+# e-mail address.
+#
+# Logsend is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation; either version 2 of
+# the License, or (at your option) any later version.
+#
+# Logsend is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public 
+# License along with this program; if not, write to the Free 
+# Software Foundation, Inc.,51 Franklin Street, Fifth Floor, 
+# Boston, MA 02110-1301 USA.
+#
+#
+# Copyright: 	Daniel Butzu (Orveldv) 
+# Mailto: 	orveldv at users dot sourceforge dot net
+# Homepage: 	http://logsend.sourceforge.net
+
+
+
+
+
+# -------------------------------------
+# info section
+
+	ORV_BASENAME="$(basename $0)"
+	ORV_SCRIPT_DATE="$(echo '$Date: 2007/04/06 09:19:44 $' | awk '{ print $"2" }')"
+	ORV_CODENAME="Og hver torne"
+
+
+
+
+
+# -------------------------------------
+# environment for boot
+
+	if [ -z "${USER}" ] ; then
+		USER="root"
+		HOME="/root"
+		SHELL="/bin/bash"
+	fi
+
+
+
+
+
+# -------------------------------------
+# orientation 
+
+	eval $(tail -n 4 "$0")
+
+	export DESTDIR
+	export ORV_SCRIPT_NAME
+	export ORV_SCRIPT_VERSION
+	export ORV_PKG_NAME
+
+	export ORV_PID=$$
+
+
+
+
+
+# -------------------------------------
+# cmdline colours
+
+	ORV_LIGHT="\033[1m"
+	ORV_NORM="\033[0m"
+
+	ORV_AST=" ${ORV_LIGHT}"'*'"${ORV_NORM}"
+	ORV_DOTS="${ORV_LIGHT}"':'"${ORV_NORM}"
+
+
+
+
+
+# -------------------------------------
+# config file section
+
+	# check if the temp dir is writable.
+	# the temp dirs we can use; put the preffered one last.
+	LH_TEMP_DIRS="${HOME}"
+	orv_temp_dirs_check() {
+		for ORV_ONE_DIR in ${LH_TEMP_DIRS}
+		do
+			if [ -w "${ORV_ONE_DIR}" ]
+			then
+				ORV_TEMP_DIR="${ORV_ONE_DIR}"
+			fi
+		done
+
+		if [ -z "${ORV_TEMP_DIR}" ] 
+		then
+			echo -e "${ORV_AST} Error${ORV_DOTS} none of:${ORV_LIGHT} ${LH_TEMP_DIRS} ${ORV_NORM}was found or writable. "
+			exit 1
+		fi
+		export ORV_TEMP_DIR
+	}
+	orv_temp_dirs_check
+
+	# config file test
+	orv_test_and_source_config() {
+		# if all the vars are unset this is not a standalone script
+		ORV_VARS="LH_MAIL_ADDRESS LH_FILES LH_GREP_STRINGS LH_BACKEND LH_GET_MEANTIME LH_MAIL_DELAYS LH_MAIL_SUBJECT" 
+		LH_ONE_VAR_SET="0"
+		for ONE_VAR_CHECK in ${ORV_VARS}
+		do
+			[ ! -z "$(eval echo '$'${ONE_VAR_CHECK})" ] && LH_ONE_VAR_SET="1"
+		done
+	
+		if [ "${LH_ONE_VAR_SET}" = "0" ]
+		then
+			# all vars unset, lets source config, but only the dialog
+			# generated if any, preventing the script to start 
+			# without previous configuration.
+	
+			# directory used for both config file and live monitor.
+			ORV_DIALOG_TEMP_DIR="${ORV_TEMP_DIR}/.${ORV_SCRIPT_NAME}/${USER}-conf/"
+			# the config file
+			LH_CONFIG_FILE="${ORV_DIALOG_TEMP_DIR}/${ORV_SCRIPT_NAME}.conf"
+			[ -r "${LH_CONFIG_FILE}" ] && source "${LH_CONFIG_FILE}"
+		fi
+	}
+	orv_test_and_source_config
+
+
+
+
+
+# -------------------------------------
+# internal settings (pre) 
+
+	# assign our settings to arrays; needed by orv_files_and_sleeps() and by lh_loop_call()
+		# assigning with <<< seems to have portability problems.
+		# read -r -a LH_FILES_ARRAY <<< "${LH_FILES}"
+	LH_FILES_ARRAY=( ${LH_FILES} )
+	LH_MAIL_DELAYS_ARRAY=( ${LH_MAIL_DELAYS} )
+	LH_GREP_STRINGS_ARRAY=( ${LH_GREP_STRINGS} )
+	
+	LH_NO_FILES=${#LH_FILES_ARRAY[*]}
+	LH_NO_TIMES=${#LH_MAIL_DELAYS_ARRAY[*]}
+	LH_NO_GREPS=${#LH_GREP_STRINGS_ARRAY[*]}
+
+	# logsend-config will never write it to the config file.
+	[ -z "${LH_MAIL_SUBJECT}" ] && LH_MAIL_SUBJECT='${HOSTNAME}: Changes in ${LH_LOG_FILE}'
+
+
+
+
+
+# -------------------------------------
+# testing section
+
+orv_global_checks() {
+
+	# check if all the vars are set
+	orv_vars_check() {	
+		for ONE_VAR_CHECK in ${ORV_VARS}
+		do
+			if [ -z "$(eval echo '$'${ONE_VAR_CHECK})" ]
+			then
+				echo -e "${ORV_AST} Error${ORV_DOTS}${ORV_LIGHT} ${ONE_VAR_CHECK} ${ORV_NORM}is not set. "
+				exit 1
+			fi
+		done
+	}
+	orv_vars_check
+
+
+	# check if the file to grep exists
+	ORV_FILES="${LH_FILES}"
+	orv_files_check() {
+		for ONE_FILE_CHECK in ${ORV_FILES}
+		do 
+			if [ ! -r "${ONE_FILE_CHECK}" ]
+			then
+				echo -e "${ORV_AST} Error${ORV_DOTS}${ORV_LIGHT} ${ONE_FILE_CHECK} ${ORV_NORM}not found or not readable. " 
+				exit 1
+			fi
+		done
+	}
+	orv_files_check
+
+
+	# check if all the needed commands are in our $PATH
+	ORV_EXECS="echo wc awk mail export sleep grep head tail cmp touch ps basename dirname cat mkfifo mkdir pgrep ls date du"
+	orv_execs_check() {
+		for ONE_EXEC_CHECK in ${ORV_EXECS}
+		do
+			if ! command -v "${ONE_EXEC_CHECK}" > /dev/null 2>&1
+			then
+				echo -e "${ORV_AST} Error${ORV_DOTS}${ORV_LIGHT} ${ONE_EXEC_CHECK} ${ORV_NORM}not found (not installed or not in your PATH). "
+                		exit 1
+        		fi
+		done
+	}
+	orv_execs_check
+
+
+	# look for backend specific settings
+	orv_backend_settings() {
+		case "${LH_BACKEND}" in 
+		'inotify') 
+			ORV_EXECS="inotifywait"
+			orv_execs_check
+
+			ORV_VARS="LH_INOTIFY_FILE_OPTS LH_INOTIFY_DIR_OPTS"
+			orv_vars_check
+			;;
+		'tail'|'simple')
+			# check if the files to watch are dirs
+			ORV_FILES="${LH_FILES}"
+			orv_not_dirs_cache_check() {
+				for ONE_FILE_CHECK in ${ORV_FILES}
+				do 
+					if [ -d "${ONE_FILE_CHECK}" ]
+					then
+						echo -e "${ORV_AST} Error${ORV_DOTS}${ORV_LIGHT} ${ONE_FILE_CHECK} ${ORV_NORM}is a directory. Not supported with the ${ORV_LIGHT}${LH_BACKEND} ${ORV_NORM}backend." 
+						exit 1
+					fi
+				done
+			}
+			orv_not_dirs_cache_check
+			;; 
+		*)
+			echo -e "${ORV_AST} Error${ORV_DOTS}${ORV_LIGHT} LH_BACKEND ${ORV_NORM}should be set to ${ORV_LIGHT}tail${ORV_NORM}, ${ORV_LIGHT}inotify${ORV_NORM} or ${ORV_LIGHT}simple${ORV_NORM}."
+			exit 1
+			;;
+		esac
+	}
+	orv_backend_settings
+
+
+	# check if the LH_MAIL_DELAYS is equal to LH_FILES - and LH_GREP_STRINGS...
+	orv_files_and_sleeps() {
+		# check for duplicates in the files array
+		LH_DUP_COUNT="0"
+		for LH_DUP_FILE in ${LH_FILES_ARRAY[*]}
+		do 
+			if [ "${LH_DUP_COUNT}" != "0" ] 
+			then
+				LH_CHECK_COUNT="0"
+				while [ "${LH_CHECK_COUNT}" -lt "${LH_DUP_COUNT}" ]
+				do    
+					LH_COMPARE_FILE="${LH_FILES_ARRAY[${LH_CHECK_COUNT}]}"
+					if [ "${LH_DUP_FILE}" = "${LH_COMPARE_FILE}" ]
+					then
+						echo -e "${ORV_AST} Error${ORV_DOTS}${ORV_LIGHT} ${LH_DUP_FILE} ${ORV_NORM}occurs more than once in${ORV_LIGHT} LH_FILES${ORV_NORM}."
+						exit 1
+					fi
+					LH_CHECK_COUNT=$((${LH_CHECK_COUNT}+1))
+				done
+			fi
+			LH_DUP_COUNT=$((${LH_DUP_COUNT}+1))
+		done
+
+		# if we don't use a single time for all files
+		if [ "${LH_NO_TIMES}" != "1" ]
+		then
+			if [ "${LH_NO_FILES}" != "${LH_NO_TIMES}" ]
+			then
+				echo -e "${ORV_AST} Error${ORV_DOTS} not the same number of files to watch and sleep times. "
+				exit 1
+			fi
+		fi
+		for ONE_SLEEP_TIME in ${LH_MAIL_DELAYS_ARRAY[*]}
+		do
+			if [ ! "$(echo ${ONE_SLEEP_TIME} | grep ".s")" ] && [ ! "$(echo ${ONE_SLEEP_TIME} | grep ".m")" ] && [ ! "$(echo ${ONE_SLEEP_TIME} | grep ".h")" ] && [ ! "$(echo ${ONE_SLEEP_TIME} | grep ".d")" ] 
+			then
+				echo -e "${ORV_AST} Error${ORV_DOTS}${ORV_LIGHT} LH_MAIL_DELAYS ${ORV_NORM}should be in ${ORV_LIGHT}sleep ${ORV_NORM}format. Type ${ORV_LIGHT}man sleep${ORV_NORM} for details."
+				exit 1
+			fi
+		done
+
+		# if we don't use a single grep string for all files
+		if [ "${LH_NO_GREPS}" != "1" ]
+		then
+			if [ "${LH_NO_FILES}" != "${LH_NO_GREPS}" ]
+			then
+				echo -e "${ORV_AST} Error${ORV_DOTS} not the same number of files to watch and strings to grep. "
+				exit 1
+			fi
+		fi
+	}
+	orv_files_and_sleeps
+
+
+	# minimalistic test of the email address
+	if [ "${LH_MAIL_ADDRESS}" = "your@email.com" ] || [ -z "${LH_MAIL_ADDRESS}" ]
+	then
+		echo -e "${ORV_AST} Error${ORV_DOTS} you should set${ORV_LIGHT} LH_MAIL_ADDRESS ${ORV_NORM}to your email address."
+		exit 1
+	fi
+
+	# advanced test of e-mail address
+	if [ "$(echo ${LH_MAIL_ADDRESS} | grep -E '.@[^\.]+\..+[^\.]$')" != "${LH_MAIL_ADDRESS}" ]
+	then
+		echo -e "${ORV_AST} Error${ORV_DOTS} you should set${ORV_LIGHT} LH_MAIL_ADDRESS ${ORV_NORM}to a valid email address."
+		exit 1
+	fi
+
+}
+
+
+
+
+
+# -------------------------------------
+# main section
+
+	LH_SIGNATURE="\n\n-- \n_________________________________________________________________________\nE-mail automatically sent by ${ORV_SCRIPT_NAME}.     Homepage: http://logsend.sf.net \n"	
+
+	# the action to perform if the file has changed
+	lh_action() {
+		if [ "${LH_INOTIFY_ISDIR}" != "1" ]
+		then
+			LH_MAIL_CONTENT="Hi. The file ${LH_LOG_FILE_ORIG} (on ${HOSTNAME}) has changed. You can see the additions below. \n\n\n"	
+		else
+			LH_MAIL_CONTENT="Hi. The directory ${LH_LOG_FILE_ORIG} (on ${HOSTNAME}) has changed. You can see the events below. \n\n\n"	
+		fi
+		echo -e "${LH_MAIL_CONTENT}$(cat ${LH_LOG_FILE_TO_SEND_MV}) ${LH_SIGNATURE}" |
+		mail -s "${LH_MAIL_SUBJECT}" "${LH_MAIL_ADDRESS}" 
+	}
+
+	# NOT YET IMPLEMENTED
+	# the action to perform if we run out of disk space
+	lh_cannot() {
+		LH_ERR_SUBJECT="${HOSTNAME}: Error while running ${ORV_SCRIPT_NAME}"
+		LH_MAIL_CONTENT="Hi. You received this e-mail because ${ORV_SCRIPT_NAME} encountered an error while performing its internal actions. This usually means that you have run out of disk space, so please check. Currently ${ORV_SCRIPT_NAME} tries to write to ${ORV_TEMP_DIR}, so you should check the partition where this folder resides. \n\nThis error may also occur if the temporary directory ( ${LH_LOG_FILE_DIR} ) became inaccessible, but this is unlikely to happen, unless you altered it yourself. \n\nBecause of this error, ${ORV_SCRIPT_NAME} exited. Good luck. "	
+
+		echo -e "${LH_MAIL_CONTENT} ${LH_SIGNATURE}" |
+		mail -s "${LH_ERR_SUBJECT}" "${LH_MAIL_ADDRESS}"
+		exit 1
+	}
+
+
+
+
+
+
+	# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	# Start watching this file with the specified backend
+
+	lh_loop_per_file() {
+		# some tests for $LH_GET_MEANTIME
+		lh_get_meantime_pre() {
+			if [ "${LH_GET_MEANTIME}" = "1" ]
+			then
+				# get the previous line counter
+				if [ -r "${LH_WRITTEN_COUNTER}" ]
+				then
+					LH_LINES=$(cat "${LH_WRITTEN_COUNTER}")
+					LH_LINES_NOW=$(wc -l "${LH_LOG_FILE}" | awk '{ print $1 }')
+					LH_LINES_NOW=$((${LH_LINES_NOW}+1))
+					# if a truncation occured
+					if [ "${LH_LINES_NOW}" -lt "${LH_LINES}" ]
+					then
+						# LH_LINES="${LH_LINES_NOW}"
+
+						# if this user wanted the meantime changes but still a truncation
+						# occured, let's at least send all the existing lines.
+						LH_LINES="1"
+					fi
+				else
+					LH_LINES=$(wc -l "${LH_LOG_FILE}" | awk '{ print $1 }')
+				fi
+
+			else
+				LH_LINES=$(wc -l "${LH_LOG_FILE}" | awk '{ print $1 }')
+				LH_LINES=$((${LH_LINES}+1))
+			fi
+			echo "${LH_LINES}" > "${LH_WRITTEN_COUNTER}"
+
+			# &FUTURE: ok but maybe everything looks fine, there are more lines now than before,
+			# but the size is smaller; this is a truncation too (no, we won't use cmp).
+			# ! Also take care while implementing size that the simple backend doesn't write
+			# the size in lh_check.
+		}
+
+
+
+		# just for safety
+		rm -f "${LH_LOCK_CHECK}"
+		rm -f "${LH_LOCK_INOTIFY}"
+		rm -f "${LH_LOCK_SLEEP}"
+		rm -f "${LH_LOCK_MV}"
+
+		# check if the selected backend and the simple one exist
+		for LH_ONE_BACKEND in simple ${LH_BACKEND}
+		do
+			if [ ! -r "${DESTDIR}/lib/${ORV_PKG_NAME}/backend-${LH_ONE_BACKEND}" ] 
+			then
+				echo; echo -e "${ORV_AST} Error${ORV_DOTS} there is no ${ORV_LIGHT}${LH_ONE_BACKEND} ${ORV_NORM}backend. Check your installation. "
+				exit 1
+			fi
+		done
+		source "${DESTDIR}/lib/${ORV_PKG_NAME}/backend-${LH_BACKEND}" 
+
+		if [ "${LH_BACKEND}" = "inotify" ]
+		then
+			# ~~~~~~~~~~~~ INOTIFY backend ~~~~~~~~~ 
+
+			# also needed with inotify.
+			source "${DESTDIR}/lib/${ORV_PKG_NAME}/backend-simple" 
+
+			# Lets see if this is a full dir to be watched
+			if [ -d "${LH_LOG_FILE}" ]
+			then
+				# ~~~~~~~~~~~~ inotify(DIR) ~~~~~~~~~~~~ 
+				lh_call_inodir & 
+			else
+				# ~~~~~~~~~~~~ inotify(FILE) ~~~~~~~~~~~ 
+				lh_call_inofile &
+			fi
+
+		elif [ "${LH_BACKEND}" = "simple" ]
+		then
+			# ~~~~~~~~~~~ SIMPLE backend ~~~~~~~~~~~ 
+			lh_call_simple &
+
+		elif [ "${LH_BACKEND}" = "tail" ]
+		then
+			# ~~~~~~~~~~~~ TAIL backend ~~~~~~~~~~~~ 
+			lh_call_tail &
+		fi
+		exit 0
+	}
+
+
+
+	# the loop for calling functions
+	# here we take the files one by one and pass them to watching fnc.
+	lh_loop_call() {
+		# we save the default mail subject; it will be 
+		# different for every file to watch
+		LH_MAIL_SUBJECT_DEFAULT="${LH_MAIL_SUBJECT}"
+
+		LH_FILE_COUNT="0"
+		while [ "${LH_FILE_COUNT}" -lt "${LH_NO_FILES}" ]
+		do    
+			# have a pair file-time one by one, per count
+			LH_LOG_FILE="${LH_FILES_ARRAY[${LH_FILE_COUNT}]}"
+			# associate a sleep time
+			if [ "${LH_NO_TIMES}" != "1" ]
+			then
+				LH_LOG_SLEEP="${LH_MAIL_DELAYS_ARRAY[${LH_FILE_COUNT}]}"
+			else
+				# the same sleep time for all, first element
+				LH_LOG_SLEEP="${LH_MAIL_DELAYS_ARRAY[0]}"
+			fi
+			# associate a string to grep
+			if [ "${LH_NO_GREPS}" != "1" ]
+			then
+				LH_GREP="${LH_GREP_STRINGS_ARRAY[${LH_FILE_COUNT}]}"
+			else
+				# the same grep time for all, first element
+				LH_GREP="${LH_GREP_STRINGS_ARRAY[0]}"
+			fi
+
+
+			# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+			# these are the files we will work with
+			# (LH_LOG_FILE is used as a dir only when watching dirs) 
+
+			# used by all
+			export LH_LOG_FILE_DIR="${ORV_TEMP_DIR}/.${ORV_SCRIPT_NAME}/${USER}/"
+			export LH_LOCK_CHECK="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.check" 
+
+			# simple + inotify(FILE) + tail
+			export LH_LOG_FILE_TO_SEND="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.send"
+			export LH_LOG_FILE_TO_SEND_MV="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.send.mv"
+
+			# inotify(FILE) + tail
+			export LH_WRITTEN_COUNTER="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.counter" 
+
+			# simple + inotify(FILE) 
+			export LH_LOG_FILE_CUT="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.cut"
+
+			# inotify(FILE)
+			export LH_LOCK_INOTIFY="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.inotify" 
+			export LH_LOCK_SLEEP="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.sleep" 
+			export LH_WRITTEN_SIZE="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.size" 
+
+			# inotify(DIR)
+			export LH_DIR_OUTFILE="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}/.dirout"
+
+			# inotify(FILE) + inotify(DIR)
+			export LH_LOCK_MV="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}/.lmv"
+
+			# tail
+			export LH_TAIL_ERRFIFO="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.tail.errfifo"
+			export LH_TAIL_OUTFILE="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.tail.out"
+			export LH_LOCK_TRUNCATION="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.truncation" 
+
+			mkdir --parents "${LH_LOG_FILE_DIR}/${LH_LOG_FILE}" > /dev/null 2>&1
+			mkdir --parents "${LH_LOG_FILE_DIR}/$(dirname ${LH_LOG_FILE})" > /dev/null 2>&1
+
+			chown -R "${USER}" "${LH_LOG_FILE_DIR}"/
+			chmod -R 700 "${LH_LOG_FILE_DIR}"/
+
+			# minimalistic test of extra options (existence)
+			[ -z "${LH_GREP_EXTRA_OPTS}" ] && export LH_GREP_EXTRA_OPTS="-e"
+
+			# define the mail subject on this file
+			LH_MAIL_SUBJECT="$(eval echo ${LH_MAIL_SUBJECT_DEFAULT})"
+			LH_LOG_FILE_ORIG="${LH_LOG_FILE}"
+
+			# call the watching loop for this file
+			lh_loop_per_file &
+
+			LH_FILE_COUNT=$((${LH_FILE_COUNT}+1))
+		done
+		exit 0
+	}
+
+
+
+
+
+# -------------------------------------
+# init section
+
+	# functions for cmd line actions
+
+	orv_search_alive() {
+		# this returns 0 if we are alive.
+		# ps axu | grep "$(basename $0)" | grep "${USER}" | grep "alive"
+		pgrep -f -x "/bin/bash".+"${ORV_BASENAME} alive" -u "${USER}" -d " "
+	}
+
+	orv_start() { 
+		orv_global_checks  
+		echo -en "${ORV_AST} Starting ${ORV_SCRIPT_NAME}${ORV_DOTS} " 
+		if [ -z "$(orv_search_alive)" ]
+		then
+			export ORV_PARENT="${ORV_PID}"
+			# this is the first job ever we run in background; 
+			# redirecting its output ensures that ssh won't hang at exit.
+			$0 alive > /dev/null 2>&1 &
+		else
+			echo -e "already running. Use ${ORV_LIGHT}restart${ORV_NORM}. "
+			exit 0
+		fi
+		echo "done."
+
+	} 
+
+	orv_stop() { 
+		orv_do_kill() {
+			# (&FUTURE: if this still fails and kills random procs,
+			# we'll get here the session ID's of the alive procs
+			# and [before every single kill] the pid to be killed
+			# will be checked against those in the sess ID string.)
+
+			# for each parent process
+			for ORV_PARENT in $(pgrep -f -x "/bin/bash".+"${ORV_BASENAME} alive" -u "${USER}" -d " ")
+			do
+					# get SID of parents;
+					# we'll need the below later if we kill by SID.
+					# ORV_ONE_SID=$( ps ax --format sess,pid,user | grep " ${ORV_PARENT} " | awk '{ print $"1" }' )
+					# ORV_ALL_SIDS="${ORV_ALL_SIDS} ${ORV_ONE_SID}"
+
+				# get its children
+				ORV_CHILDREN="$(pgrep -P ${ORV_PARENT})"
+				# kill this parent
+				while kill -0 ${ORV_PARENT} > /dev/null 2>&1
+				do
+					kill ${ORV_PARENT} > /dev/null 2>&1
+				done
+				ORV_ALL_CHILDREN="${ORV_ALL_CHILDREN} ${ORV_CHILDREN}"
+			done
+
+			# kill the children
+			for ORV_ONE_CHILD in ${ORV_ALL_CHILDREN}
+			do
+				while kill -0 ${ORV_ONE_CHILD} > /dev/null 2>&1
+				do
+					kill ${ORV_ONE_CHILD} > /dev/null 2>&1
+				done
+			done
+
+			# -- this is dangerous; will also kill procs launched 
+			# -- from the same terminal but not belonging to logsend.
+			#
+			# # if there were detached procs from parents, kill them by SID.
+			# for ORV_ONE_SID in ${ORV_ALL_SIDS}
+			# do
+			# 	ORV_PROCS_BY_SID=$(pgrep -s ${ORV_ONE_SID} -u "${USER}" -d " ")
+			# 	for ONE_PROC_BY_SID in ${ORV_PROCS_BY_SID}
+			# 	do
+			# 		if [ "${ONE_PROC_BY_SID}" != "${ORV_ONE_SID}" ] && [ "${ONE_PROC_BY_SID}" != "$$" ]
+			# 		then
+			# 			while kill -0 ${ONE_PROC_BY_SID} > /dev/null 2>&1
+			# 			do
+			# 				kill ${ONE_PROC_BY_SID} > /dev/null 2>&1
+			# 			done
+			# 		fi
+			# 	done
+			# done
+		}
+
+		echo -en "${ORV_AST} Stopping ${ORV_SCRIPT_NAME}${ORV_DOTS} "
+		# if we aren't alive
+		if [ -z "$(orv_search_alive)" ]
+		then
+			case ${ORV_PAR2} in 
+			[Nn][Oo][Ww]) 
+				echo -en "forced!${ORV_DOTS} "
+				;;			
+			*)
+#				echo -e "not running. Use ${ORV_LIGHT}stop now${ORV_NORM} to pass this test. "
+				echo -e "not running. "
+				return
+				;;
+			esac
+		fi
+
+		echo -en "sending signals${ORV_DOTS} " 
+		orv_do_kill
+		echo "done."
+	} 
+
+	orv_version() {
+		echo -e "${ORV_SCRIPT_NAME} version ${ORV_SCRIPT_VERSION}, ${ORV_SCRIPT_DATE} (${ORV_CODENAME})."
+	}
+
+	orv_usage() {
+		echo "Logsend, a daemon for e-mail notification of log file changes, v. ${ORV_SCRIPT_VERSION}"
+		echo
+		echo "Usage: logsend <OPTION>"
+		echo
+		echo "Supported options:"
+		echo "                    start"
+		echo "                    stop"
+		echo "                    restart"
+		echo "                    status"
+		echo "                    config"
+		echo 
+		echo "  -V, --version     show version information"
+		echo "  -h, --help        show this message"
+		echo
+	}
+
+	orv_status() {
+		echo -en "${ORV_AST} Status${ORV_DOTS} ${ORV_SCRIPT_NAME} "
+		if [ -z "$(orv_search_alive)" ]
+		then
+			echo -e "is ${ORV_LIGHT}not running${ORV_NORM}."
+		else
+			echo -e "is ${ORV_LIGHT}running${ORV_NORM}."
+		fi
+	}
+
+	orv_alive() {
+		# since {tmp check} and {source config file} now are sepparated
+		# from the global checks, we don't need this anymore.
+		# orv_global_checks 
+
+		if [ -z "${ORV_PARENT}" ]
+		then
+			echo ; echo -e "${ORV_AST} Error${ORV_DOTS} ${ORV_LIGHT}${ORV_PAR1} ${ORV_NORM}is an internal action. Use ${ORV_LIGHT}start ${ORV_NORM}instead."
+			exit 0
+		fi
+		lh_loop_call &
+		exit 0
+	}
+
+	orv_config() {
+
+		cd "${DESTDIR}/lib/${ORV_PKG_NAME}/" ; ./logsend-config 
+		exit 0
+	}
+
+
+
+	# lets preserve params or they'll be lost later on (believe me) 
+
+	ORV_PPCOUNT=1
+	until [ -z "$1" ]  # Until all parameters are used up...
+	do
+		export "ORV_PAR${ORV_PPCOUNT}"=$1
+		ORV_PPCOUNT=$((${ORV_PPCOUNT}+1))
+		shift
+	done
+
+
+	# ok lets see what is the action and perform it
+	
+	case "${ORV_PAR1}" in 
+	'start') 
+		orv_start
+		;; 
+	'stop') 
+		orv_stop
+		;; 
+	'restart') 
+		# we force stop even no instance is running.
+		# ORV_PAR2="now"
+		orv_stop ; orv_start
+		;; 
+	'status')
+		orv_status
+		;;
+	'-V'|'--version') 
+		orv_version
+		;;
+	'alive')
+		orv_alive
+		;;
+	'config')
+		orv_config
+		;;
+	'-h'|'--help'|*) 
+		orv_usage
+		;;
+	esac
+	exit 0
+
+
+
+
+
+# -------------------------------------
+# prefix section
+

@@ -1,0 +1,48 @@
+2007-04-06  orveldv  <orveldv@users.sourceforge.net>
+
+	Version 1.0.
+	* Added the TAIL backend;
+	* Added the SIMPLE backend;
+	* Rewritten the INOTIFY backend from scratch for better reliability
+	and performance;
+	* Rewritten the init section (the stop option);
+	* Fixed the output redirection of background jobs so that the ssh
+	connections won't hang after starting logsend;
+	* Fixed multiple issues with the live monitor:
+		- word wrapping on the printed lines;
+		- the user settings (the strings to search) are applied;
+		- any user can now run multiple instances;
+	* Added support for e-mail delays longer than one day;
+	* Replaced all the relative paths with absolute paths;
+	* Dropped the useless double-check of files, vars, execs;
+	* Dropped the CACHE backend.
+
+2007-01-11  orveldv  <orveldv@users.sourceforge.net>
+
+	Version 0.5.
+	* Fixed turning on/off colours for cmdline actions;
+	* Fixed the dialog based interface; now editing strings & delays 
+	works on old bash 2.05a.0.
+
+2007-01-10  orveldv  <orveldv@users.sourceforge.net>
+
+	Version 0.4.
+	* Improved the CACHE backend;
+	* Added test for the e-mail address format;
+	* Fixed bug in init stop section which caused random processes kill;
+	* Added installer;
+	* Added dialog-based configuration tool.
+
+	Version 0.3.
+	* Added support for more than one file;
+	* Added the INOTIFY backend;
+	* Improved the init section.
+
+	Version 0.2.
+	* Added tests for files, vars, execs;
+	* Added extra options for grep;
+	* Improved the init section.
+
+	Version 0.1. 
+	* First version; watching only one file is possible.
+

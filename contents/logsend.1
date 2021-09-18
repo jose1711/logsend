@@ -1,0 +1,67 @@
+.\" $Id: logsend.1,v 1.2 2007/04/06 09:19:47 orveldv Exp $
+.\"
+.\" Process this file with
+.\" groff -man -Tascii logsend.1
+.\"
+.TH Logsend 1 "April 2007" " " "The Log Sender"
+.SH NAME
+logsend \- daemon for e-mail notification of log file changes
+.SH SYNOPSIS
+.B "logsend <OPTION>"
+.
+.SH DESCRIPTION
+The main goal of logsend is to provide an easy way of
+receiving e-mail notifications about the changes 
+to the system's (log) files, which makes it suitable for 
+watching mainly the server activity.
+
+Logsend acts like a daemon; it watches the specified files 
+and mails the changes (additions) to your e-mail address. 
+It can search for a pattern in the new added lines and 
+send only those that match. It uses either the inotify 
+kernel subsystem or the tail backend for the systems which don't 
+support inotify (eg. the 2.4 linux kernels, or the non-linux ones).
+
+Since logsend can watch any text file, it can be used
+in association with other (security) tools, such as Snort,
+if their output is redirected to a file. Log rotation is fully 
+supported.
+
+Logsend comes with a dialog-based
+configuration tool, but configuring by hand is also possible and
+straightforward. It also comes with a live file monitor, allowing
+users to watch the changes in real time. Any user can run an instance
+of logsend if the files to watch are readable.
+.SH OPTIONS
+.IP "start, stop, restart, status"
+.
+.br
+Use them to control the logsend daemon.
+.br
+.IP config
+.
+.br
+Brings up the dialog based configuration tool. Use it both for
+configuring logsend and for live file monitoring.
+.br
+.IP "-V, --version"
+.
+.br
+Show version information.
+.br
+.IP "-h, --help"
+.
+.br
+Show usage.
+.
+.br
+When no OPTION is given, logsend prints the usage information.
+.SH "BUGS"
+Logsend is written in bash and forks subshells for its actions; 
+the more files it watches, the more subshells will be forked.
+This might be a problem on systems with very restrictive process limits,
+when is not running as the root user.
+.SH HOMEPAGE
+http://logsend.sourceforge.net
+.SH AUTHOR
+Daniel Butzu <orveldv at users dot sourceforge dot net>

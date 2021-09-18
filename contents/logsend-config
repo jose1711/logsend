@@ -1,0 +1,1805 @@
+#!/bin/bash
+# $Id: logsend-config,v 0.9 2007/04/06 15:31:12 orveldv Exp $
+#
+# Logsend watches files and mails the additions to your 
+# e-mail address.
+#
+# Logsend is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation; either version 2 of
+# the License, or (at your option) any later version.
+#
+# Logsend is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public 
+# License along with this program; if not, write to the Free 
+# Software Foundation, Inc.,51 Franklin Street, Fifth Floor, 
+# Boston, MA 02110-1301 USA.
+#
+#
+# Copyright: 	Daniel Butzu (Orveldv) 
+# Mailto: 	orveldv at users dot sourceforge dot net
+# Homepage: 	http://logsend.sourceforge.net
+
+
+
+
+
+# -------------------------------------
+# orientation 
+
+	eval $(tail -n 4 "$0")
+
+	export DESTDIR
+	export ORV_SCRIPT_NAME
+	export ORV_SCRIPT_VERSION
+	export ORV_PKG_NAME
+
+	export ORV_PID=$$
+
+
+
+
+
+# -------------------------------------
+# cmdline colours
+
+	ORV_LIGHT="\033[1m"
+	ORV_NORM="\033[0m"
+
+	ORV_AST=" ${ORV_LIGHT}"'*'"${ORV_NORM}"
+	ORV_DOTS="${ORV_LIGHT}"':'"${ORV_NORM}"
+
+	echo -en "${ORV_AST} Starting the interface ... "
+
+
+
+
+# -------------------------------------
+# testing section
+
+	# check if all the needed commands are in our $PATH
+	ORV_EXECS="echo wc awk mail export sleep grep head tail cmp touch ps basename dirname cat mkfifo mkdir dialog date tr fold stty pgrep"
+	orv_execs_check() {
+		for ONE_EXEC_CHECK in ${ORV_EXECS}
+		do
+			if ! command -v "${ONE_EXEC_CHECK}" > /dev/null 2>&1
+			then
+				echo -e "${ORV_AST} Error${ORV_DOTS}${ORV_LIGHT} ${ONE_EXEC_CHECK} ${ORV_NORM}not found (not installed or not in your PATH). "
+                		exit 1
+        		fi
+		done
+	}
+	# once again I forgot to DO EXECUTE it.
+	orv_execs_check
+
+
+	# check if the temp dir is writable.
+	# the temp dirs we can use; put the preffered one last.
+	LH_TEMP_DIRS="${HOME}"
+	orv_temp_dirs_check() {
+		for ORV_ONE_DIR in ${LH_TEMP_DIRS}
+		do
+			if [ -w "${ORV_ONE_DIR}" ]
+			then
+				ORV_TEMP_DIR="${ORV_ONE_DIR}"
+			fi
+		done
+
+		if [ -z "${ORV_TEMP_DIR}" ] 
+		then
+			echo -e "${ORV_AST} Error${ORV_DOTS} none of:${ORV_LIGHT} ${LH_TEMP_DIRS} ${ORV_NORM}was found or writable. "
+			exit 1
+		fi
+		export ORV_TEMP_DIR
+	}
+	orv_temp_dirs_check
+
+
+
+
+
+# -------------------------------------
+# main section
+
+
+	ORV_DIALOG="dialog"
+	ORV_DIALOG_BACKTITLE="${ORV_SCRIPT_NAME} v. ${ORV_SCRIPT_VERSION} configuration tool      user:${USER} | host:${HOSTNAME}      http://logsend.sf.net"	
+
+	# directory used for both config file and live monitor
+	ORV_DIALOG_TEMP_DIR="${ORV_TEMP_DIR}/.${ORV_SCRIPT_NAME}/${USER}-conf/"
+	mkdir --parents "${ORV_DIALOG_TEMP_DIR}" > /dev/null 2>&1
+	chown -R "${USER}" "${ORV_DIALOG_TEMP_DIR}"/
+	chmod 700 "${ORV_DIALOG_TEMP_DIR}"/
+
+	# the config file
+	LH_CONFIG_FILE="${ORV_DIALOG_TEMP_DIR}/${ORV_SCRIPT_NAME}.conf"
+	# the default config file
+	LH_DEFAULT_CONFIG_FILE="${DESTDIR}/share/${ORV_PKG_NAME}/logsend.conf.default"
+
+	source "${LH_DEFAULT_CONFIG_FILE}"
+	[ -r "${LH_CONFIG_FILE}" ] && source "${LH_CONFIG_FILE}"
+
+	# temporary files for dialog output and partial configuration
+	ORV_DLG_TMPFILE="${ORV_DIALOG_TEMP_DIR}/${ORV_SCRIPT_NAME}.tempout.$$"
+	ORV_DLG_TMPCONF="${ORV_DIALOG_TEMP_DIR}/${ORV_SCRIPT_NAME}.tempconf.$$"
+
+	# we will need it inside loops
+	export DIALOGRC
+
+	LH_DEFAULT_SLEEP_TIME="10m"
+	LH_DEFAULT_GREP_STRING="."
+
+
+
+# tests for user settings
+orv_mail_address_test() {
+	ORV_YES_NONMAIL="0"
+	if [ "$(echo ${LH_MAIL_ADDRESS_TO_TEST} | grep -E '.@[^\.]+\..+[^\.]$')" != "${LH_MAIL_ADDRESS_TO_TEST}" ] || [ "${LH_MAIL_ADDRESS_TO_TEST}" = "your@email.com" ] || ( echo "${ORV_CHOICE}" | grep -q -e  ".\ ." )
+	then
+		ORV_YES_NONMAIL="1"
+		ORV_BAD_EMAIL="${LH_MAIL_ADDRESS_TO_TEST}"
+		orv_dialog_email_invalid
+	fi
+	[ "${ORV_YES_NONMAIL}" = "1" ] && continue
+}
+
+
+orv_sleep_format_test() {
+		if [ ! "$(echo ${ONE_SLEEP_TIME} | grep ".s")" ] && [ ! "$(echo ${ONE_SLEEP_TIME} | grep ".m")" ] && [ ! "$(echo ${ONE_SLEEP_TIME} | grep ".h")" ] && [ ! "$(echo ${ONE_SLEEP_TIME} | grep ".d")" ] 
+		then
+			ORV_YES_NONSLEEP="1"
+			orv_dialog_sleep_invalid
+		fi
+
+ 		if ( echo "${ORV_CHOICE}" | grep -q -e  ".\ ." )
+		then
+			ORV_YES_NONSLEEP="1"
+			orv_dialog_sleep_invalid
+		fi
+}
+
+
+orv_clean_temps() {
+	rm -f "${ORV_DLG_TMPFILE}"
+	rm -f "${ORV_DLG_TMPCONF}"
+}
+
+
+
+
+
+# -------------------------------------
+# dialog windows start here
+
+
+
+orv_dialog_welcome() {
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Welcome" \
+--msgbox "\nWelcome to the ${ORV_SCRIPT_NAME} configuration tool.\n\
+Your settings will NOT be saved until you \n\
+exit and explicitly choose to save.\n\n\
+Press 'ENTER' to continue or 'ESC' to exit.\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+}
+
+
+
+orv_dialog_exit() {
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Quit" \
+--yesno "\nSave the new settings?\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_save_settings() {
+	[ -r "${ORV_DLG_TMPCONF}" ] && source "${ORV_DLG_TMPCONF}"
+
+	echo "# configuration file for logsend" > "${LH_CONFIG_FILE}"	
+	echo "# autogenerated by logsend-config" >> "${LH_CONFIG_FILE}"	
+	echo "# -------------------------------" >> "${LH_CONFIG_FILE}"	
+	echo >> "${LH_CONFIG_FILE}"	
+
+	echo LH_FILES='"'${LH_FILES}'"' >> "${LH_CONFIG_FILE}"		
+	echo LH_GREP_STRINGS='"'${LH_GREP_STRINGS}'"' >> "${LH_CONFIG_FILE}"
+	echo LH_MAIL_DELAYS='"'${LH_MAIL_DELAYS}'"' >> "${LH_CONFIG_FILE}"
+	echo LH_MAIL_ADDRESS='"'${LH_MAIL_ADDRESS}'"' >> "${LH_CONFIG_FILE}"
+
+	echo LH_GET_MEANTIME='"'${LH_GET_MEANTIME}'"' >> "${LH_CONFIG_FILE}"
+	echo LH_GREP_EXTRA_OPTS='"'${LH_GREP_EXTRA_OPTS}'"' >> "${LH_CONFIG_FILE}"
+	echo LH_TAIL_EXTRA_OPTS='"'${LH_TAIL_EXTRA_OPTS}'"' >> "${LH_CONFIG_FILE}"
+	echo LH_INOTIFY_FILE_OPTS='"'${LH_INOTIFY_FILE_OPTS}'"' >> "${LH_CONFIG_FILE}"
+	echo LH_INOTIFY_DIR_OPTS='"'${LH_INOTIFY_DIR_OPTS}'"' >> "${LH_CONFIG_FILE}"
+	echo LH_BACKEND='"'${LH_BACKEND}'"' >> "${LH_CONFIG_FILE}"		
+	echo DIALOGRC='"'${DIALOGRC}'"' >> "${LH_CONFIG_FILE}"		
+
+	# functional, but may confuse some users.
+	# echo LH_MAIL_SUBJECT="'"${LH_MAIL_SUBJECT}"'" >> "${LH_CONFIG_FILE}"		
+}
+
+
+
+orv_dialog_main() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Main menu" \
+--cancel-label "Quit" \
+--default-item "1" \
+--menu "\n You should set up at least the 'Basic \n configuration' \
+and send a test e-mail.\n \n" \
+0 0 0 \
+"1" " Basic configuration     (required) " \
+"2" " Advanced configuration  (optional) " \
+"3" " Internal settings       (experts!) " \
+"" "" \
+"4" " Send a test e-mail                 " \
+"5" " Live file monitor                  " \
+"6" " Restore defaults                   " \
+"7" " About                              " 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_dialog_base_conf() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Basic configuration" \
+--cancel-label "Back" \
+--default-item "1" \
+--menu "\nSpecify at least the files to watch and your e-mail address.\n \n" \
+0 0 0 \
+"1" " Files to watch    " \
+"2" " E-mail address    " \
+"3" " Strings to search " \
+"4" " E-mail delays     " 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_dialog_list_files() {
+	LH_FILE_COUNT="0"
+ 	for ORV_DIALOG_ONE_FILE in ${LH_FILES}
+	do
+		echo "$((${LH_FILE_COUNT}+1))" 
+		echo "${ORV_DIALOG_ONE_FILE}"
+		LH_FILE_COUNT=$((${LH_FILE_COUNT}+1))
+	done
+}
+
+
+
+orv_dialog_files() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Files to watch" \
+--help-button \
+--defaultno \
+--default-item "1" \
+--ok-label "Remove" \
+--cancel-label "Back" \
+--help-label "Add" \
+--menu "\nThis is the list of the files to watch. Use the\n\
+'Add' and 'Remove' buttons to specify the files.\n \n" \
+0 0 0 \
+$(orv_dialog_list_files) \
+"" "" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL="$?"
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_dialog_not_readable() {
+		${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "File or directory not readable" \
+--msgbox "\n${ORV_FILE_TO_POINT} doesn't exist or is not readable. Please check.\n\n" \
+0 0 
+}
+
+
+
+orv_dialog_no_spaces() {
+		${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Spaces not supported" \
+--msgbox "\nStrings containing white spaces are not supported. \
+Send an e-mail to orveldv@users.sourceforge.net and let me know if you need this.\n\n" \
+0 0 
+}
+
+
+
+orv_dialog_add_file() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Add file" \
+--inputbox "\nEnter a new file to watch, with its full path, like this: \n \n\
+/path/to/file \n \n" \
+0 0 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_arrange_arrays_add() {
+	[ -z "${ORV_CHOICE}" ] && continue
+
+	if [ ! -r "${ORV_CHOICE}" ]
+	then
+		ORV_FILE_TO_POINT="${ORV_CHOICE}"
+		orv_dialog_not_readable
+		continue
+	fi
+
+	if ( echo "${ORV_CHOICE}" | grep -q -e  ".\ ." )
+	then
+		orv_dialog_no_spaces
+		continue
+	fi
+
+	# a file was added; what we need to do:
+	# 1. add this file to the string of files
+	LH_FILES="${LH_FILES} ${ORV_CHOICE}"		
+
+	# 2. add a default time to the string of times
+	LH_MAIL_DELAYS="${LH_MAIL_DELAYS} ${LH_DEFAULT_SLEEP_TIME}"	
+
+	# 3. add a default grep to the string of greps
+	LH_GREP_STRINGS="${LH_GREP_STRINGS} ${LH_DEFAULT_GREP_STRING}" 
+
+	# we don't care of arranging arrays, it will be 
+	# done by orv_files_conversion
+	
+	echo LH_FILES='"'${LH_FILES}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+
+orv_arrange_arrays_remove() {
+	[ -z "${ORV_CHOICE}" ] && return
+	# a file was removed, so:
+	# 1. remove the file from the array of files
+	ORV_CHOICE=$((${ORV_CHOICE}-1))
+	unset LH_FILES_ARRAY[${ORV_CHOICE}]
+	# 2. remove its sleep-time from the array of sleeps
+	unset LH_MAIL_DELAYS_ARRAY[${ORV_CHOICE}]
+	# 3. remove its grep from the array of greps
+	unset LH_GREP_STRINGS_ARRAY[${ORV_CHOICE}]
+
+	# since when we exit this fnc, orv_files_conversion
+	# will rearrange arrays depending of strings, we
+	# should have the strings set ok here
+	LH_FILES="$(echo ${LH_FILES_ARRAY[*]})"
+	LH_MAIL_DELAYS="$(echo ${LH_MAIL_DELAYS_ARRAY[*]})"
+	LH_GREP_STRINGS="$(echo ${LH_GREP_STRINGS_ARRAY[*]})"
+							
+	echo LH_FILES='"'${LH_FILES}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+
+orv_files_conversion() {
+	# this fnc is called in every modify loop ;
+	# it sets up arrays and checks for duplicates
+	unset LH_FILES_ARRAY ; unset LH_FILES_ARRAY[*]
+	unset LH_MAIL_DELAYS_ARRAY ; unset LH_MAIL_DELAYS_ARRAY[*]
+	unset LH_GREP_STRINGS_ARRAY ; unset LH_GREP_STRINGS_ARRAY[*]
+
+	LH_FILES_ARRAY=( ${LH_FILES} )
+	LH_MAIL_DELAYS_ARRAY=( ${LH_MAIL_DELAYS} )
+	LH_GREP_STRINGS_ARRAY=( ${LH_GREP_STRINGS} )
+		
+	LH_NO_FILES=${#LH_FILES_ARRAY[*]}
+	LH_NO_TIMES=${#LH_MAIL_DELAYS_ARRAY[*]}
+	LH_NO_GREPS=${#LH_GREP_STRINGS_ARRAY[*]}
+
+	# lets have arrays with the same numbers of elements, for simetry.
+	# this implies:
+	# 1. if there are more files than strings / sleeps, add default values
+	# to remaining (unset) strings /sleeps ;
+	# 2. if there are less files than strings / sleeps, unset 
+	# the remaining (set) strings / sleeps.
+
+	#1.
+	LH_FILE_COUNT="0"
+	while [ "${LH_FILE_COUNT}" -lt "${LH_NO_FILES}" ]
+	do    
+		if [ -z "${LH_GREP_STRINGS_ARRAY[${LH_FILE_COUNT}]}" ] 
+		then
+			LH_GREP_STRINGS_ARRAY[${LH_FILE_COUNT}]="${LH_DEFAULT_GREP_STRING}"
+		fi
+		if [ -z "${LH_MAIL_DELAYS_ARRAY[${LH_FILE_COUNT}]}" ]
+		then
+			LH_MAIL_DELAYS_ARRAY[${LH_FILE_COUNT}]="${LH_DEFAULT_SLEEP_TIME}"	
+		fi
+		LH_FILE_COUNT=$((${LH_FILE_COUNT}+1))
+	done
+	#2.
+	LH_GREP_COUNT="0"
+	while [ "${LH_GREP_COUNT}" -lt "${LH_NO_GREPS}" ]
+	do    
+		if [ -z "${LH_FILES_ARRAY[${LH_GREP_COUNT}]}" ] 
+		then
+			unset LH_GREP_STRINGS_ARRAY[${LH_GREP_COUNT}]
+		fi
+		LH_GREP_COUNT=$((${LH_GREP_COUNT}+1))
+	done
+	LH_TIME_COUNT="0"
+	while [ "${LH_TIME_COUNT}" -lt "${LH_NO_TIMES}" ]
+	do    
+		if [ -z "${LH_FILES_ARRAY[${LH_TIME_COUNT}]}" ] 
+		then
+			unset LH_MAIL_DELAYS_ARRAY[${LH_TIME_COUNT}]
+		fi
+		LH_TIME_COUNT=$((${LH_TIME_COUNT}+1))
+	done
+
+
+	# check for duplicates in the files array
+	LH_DUP_COUNT="0"
+	for LH_DUP_FILE in ${LH_FILES_ARRAY[*]}
+	do 
+		if [ "${LH_DUP_COUNT}" != "0" ] 
+		then
+			LH_CHECK_COUNT="0"
+			while [ "${LH_CHECK_COUNT}" -lt "${LH_DUP_COUNT}" ]
+			do    
+				LH_COMPARE_FILE="${LH_FILES_ARRAY[${LH_CHECK_COUNT}]}"
+				if [ "${LH_DUP_FILE}" = "${LH_COMPARE_FILE}" ]
+				then
+					# get rid of the duplicate
+					unset LH_FILES_ARRAY[${LH_DUP_COUNT}]
+					unset LH_MAIL_DELAYS_ARRAY[${LH_DUP_COUNT}]
+					unset LH_GREP_STRINGS_ARRAY[${LH_DUP_COUNT}]
+				fi
+				LH_CHECK_COUNT=$((${LH_CHECK_COUNT}+1))
+			done
+		fi
+		LH_DUP_COUNT=$((${LH_DUP_COUNT}+1))
+	done
+
+	# and back to the strings
+	LH_FILES="$(echo ${LH_FILES_ARRAY[*]})"
+	LH_MAIL_DELAYS="$(echo ${LH_MAIL_DELAYS_ARRAY[*]})"
+	LH_GREP_STRINGS="$(echo ${LH_GREP_STRINGS_ARRAY[*]})"
+}
+
+
+
+orv_dialog_list_strings() {
+	LH_FILE_COUNT="0"
+	while [ "${LH_FILE_COUNT}" -lt "${LH_NO_FILES}" ]
+	do    
+		echo "${LH_FILES_ARRAY[${LH_FILE_COUNT}]}" 
+		if [ "${LH_GREP_STRINGS_ARRAY[${LH_FILE_COUNT}]}" = "." ]
+		then
+			echo "(everything)"
+		else
+			echo "${LH_GREP_STRINGS_ARRAY[${LH_FILE_COUNT}]}"
+		fi
+		LH_FILE_COUNT=$((${LH_FILE_COUNT}+1))
+	done
+}
+
+
+
+orv_dialog_strings() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Strings to search" \
+--defaultno \
+--help-button \
+--ok-label "Edit" \
+--cancel-label "Back" \
+--menu "\nTo the right of every file you can \
+see the string to search for \
+in that file. Press 'Edit' to change these strings. \
+Press 'Help' for more details.\n \n" \
+0 0 0 \
+$(orv_dialog_list_strings) \
+"" "" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_which_file() {
+	# now lets find out what was the file's position in files array
+	LH_FILE_COUNT="0"
+	for ORV_ONE_FILE in ${LH_FILES_ARRAY[*]}
+	do    
+		if [ "${ORV_ONE_FILE}" = "${ORV_CHOICE}" ]
+		then
+			ORV_POS="${LH_FILE_COUNT}" 
+		fi
+		LH_FILE_COUNT=$((${LH_FILE_COUNT}+1))
+	done
+}
+
+
+
+orv_dialog_edit_string() {
+	[ -z "${ORV_CHOICE}" ] && continue
+
+	if [ "${LH_GREP_STRINGS_ARRAY[${ORV_POS}]}" = "." ]
+	then
+		ORV_INPUT_INIT=""
+	else
+		ORV_INPUT_INIT="${LH_GREP_STRINGS_ARRAY[${ORV_POS}]}"
+	fi
+
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Change search string" \
+--inputbox "\nEnter the string to search for in \
+the file: ${ORV_CHOICE}. Leave it blank to get all \
+the changes. Check the manual if you need complex strings. \n \n" \
+0 0 "${ORV_INPUT_INIT}" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+[ "${ORV_RETVAL}" = "0" ] && ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_set_this_grep() {
+	[ -z "${ORV_CHOICE}" ] && ORV_CHOICE="."
+
+	if ( echo "${ORV_CHOICE}" | grep -q -e  ".\ ." )
+	then
+		orv_dialog_no_spaces
+		continue
+	fi
+
+	#unset LH_GREP_STRINGS_ARRAY[${ORV_POS}]
+	LH_GREP_STRINGS_ARRAY[${ORV_POS}]="${ORV_CHOICE}"
+
+	# this is needed for orv_files_conversion
+	LH_GREP_STRINGS="$(echo ${LH_GREP_STRINGS_ARRAY[*]})"
+
+	echo LH_GREP_STRINGS='"'${LH_GREP_STRINGS}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+
+orv_dialog_sleeps() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "E-mail delays" \
+--defaultno \
+--help-button \
+--ok-label "Edit" \
+--cancel-label "Back" \
+--menu "\nTo the right of every file you can \
+see the minimum delay between the e-mails to be \
+sent while watching that file. \
+Press 'Edit' to change these delays. \
+Press 'Help' for more details.\n \n" \
+0 0 0 \
+$(orv_dialog_list_sleeps) \
+"" "" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_dialog_list_sleeps() {
+	LH_FILE_COUNT="0"
+	while [ "${LH_FILE_COUNT}" -lt "${LH_NO_FILES}" ]
+	do    
+		echo "${LH_FILES_ARRAY[${LH_FILE_COUNT}]}" 
+		echo "${LH_MAIL_DELAYS_ARRAY[${LH_FILE_COUNT}]}"
+
+		LH_FILE_COUNT=$((${LH_FILE_COUNT}+1))
+	done
+}
+
+
+
+orv_dialog_edit_sleep() {
+	[ -z "${ORV_CHOICE}" ] && continue
+
+	#if [ "${LH_MAIL_DELAYS_ARRAY[${ORV_POS}]}" = "10m" ]
+	#then
+	#	ORV_INPUT_INIT=""
+	#else
+		ORV_INPUT_INIT="${LH_MAIL_DELAYS_ARRAY[${ORV_POS}]}"
+	#fi
+
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Change e-mail delay" \
+--inputbox "\nEnter the minimum delay between the e-mails \
+to be sent while watching \
+the file: ${ORV_CHOICE}. You can leave it blank for \
+default, 10 minutes. \n \nBEWARE: the time is in 'sleep' \
+format.\n \n" \
+0 0 "${ORV_INPUT_INIT}" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+[ "${ORV_RETVAL}" = "0" ] && ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_dialog_sleep_invalid() {
+		${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Invalid e-mail delay" \
+--msgbox "\n${ONE_SLEEP_TIME} is not in sleep format. Please check.\n\n" \
+0 0 
+}
+
+
+
+orv_set_this_sleep() {
+	[ -z "${ORV_CHOICE}" ] && ORV_CHOICE="10m"
+
+	ORV_YES_NONSLEEP="0"
+	ONE_SLEEP_TIME="${ORV_CHOICE}"
+	orv_sleep_format_test
+	[ "${ORV_YES_NONSLEEP}" = "1" ] && continue
+
+
+	unset LH_MAIL_DELAYS_ARRAY[${ORV_POS}]
+	LH_MAIL_DELAYS_ARRAY[${ORV_POS}]="${ORV_CHOICE}"
+
+	# this is needed for orv_files_conversion
+	LH_MAIL_DELAYS="$(echo ${LH_MAIL_DELAYS_ARRAY[*]})"
+
+	echo LH_MAIL_DELAYS='"'${LH_MAIL_DELAYS}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+
+orv_dialog_grep_help() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "About the strings to search" \
+--msgbox "\nWhile watching a file for changes, you may \
+not be interested in all the lines added to the file, \
+but only in the lines that contain a certain word (or string). \
+For example, you need to watch the /var/log/auth.log file to \
+know who and when logs in, but you are interested only in the \
+remote logins, via ssh; in this case the string to search for is \
+'ssh', and an e-mail will be sent when lines containing 'ssh' \
+will be added to auth.log. \n \n" \
+0 0
+}
+
+
+
+orv_dialog_sleep_help() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "About the e-mail delay" \
+--msgbox "\nSometimes, if changes occur \
+too often to a file, you will be bombed with e-mails. \
+Setting a minimum delay between \
+the e-mails to be sent will prevent this from happening. \
+If you don't specify a delay, the default will \
+be used, which is 10 minutes. \
+The time format for the delay is the one used by 'sleep' \
+(50s = 50 seconds; 20m = 20 minutes; 5h = 5 hours; \
+1d = 1 day). Check the sleep man page for more details. \n \n" \
+0 0
+}
+
+
+
+orv_dialog_email_address() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "E-mail address" \
+--inputbox "\nEnter the e-mail address where to send \
+the notifications when changes occur to files.\n \n" \
+0 0 "${LH_MAIL_ADDRESS}" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+[ "${ORV_RETVAL}" = "0" ] && ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_dialog_email_invalid() {
+		${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Invalid e-mail address" \
+--msgbox "\n${ORV_BAD_EMAIL} is not a valid e-mail address. Please check.\n\n" \
+0 0 
+}
+
+
+
+orv_set_email_address() {
+
+	if [ -z "${ORV_CHOICE}" ]
+	then
+		continue
+	fi
+
+	LH_MAIL_ADDRESS_TO_TEST="${ORV_CHOICE}"
+	orv_mail_address_test
+
+	LH_MAIL_ADDRESS="${ORV_CHOICE}"
+	echo LH_MAIL_ADDRESS='"'${LH_MAIL_ADDRESS}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+
+orv_dialog_backend() {
+	case ${LH_BACKEND} in
+	'simple')
+	 	ORV_DIALOG_SIMPLE_STATUS="on"
+		ORV_DIALOG_INOTIFY_STATUS="off"
+		ORV_DIALOG_TAIL_STATUS="off"
+	;;
+	'inotify')
+	 	ORV_DIALOG_SIMPLE_STATUS="off"
+		ORV_DIALOG_INOTIFY_STATUS="on"
+		ORV_DIALOG_TAIL_STATUS="off"
+	;;
+	# users who upgrade and used cache should switch to tail.
+	'tail'|*)
+	 	ORV_DIALOG_SIMPLE_STATUS="off"
+		ORV_DIALOG_INOTIFY_STATUS="off"
+		ORV_DIALOG_TAIL_STATUS="on"
+	;;
+	esac
+
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Backend to use" \
+--help-button \
+--radiolist "\nLogsend can use different backends \
+to detect the changes to the files. \
+TAIL is safe. INOTIFY \
+should work with recent linux kernels. \
+SIMPLE doesn't support log rotation. \
+Press 'Help' for more details.\n \n" \
+0 0 0 \
+"tail" "" "${ORV_DIALOG_TAIL_STATUS}" \
+"inotify" "" "${ORV_DIALOG_INOTIFY_STATUS}" \
+"simple" "" "${ORV_DIALOG_SIMPLE_STATUS}" \
+2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+#[ "${ORV_RETVAL}" = "0" ] && 
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_set_backend() {
+	LH_BACKEND="${ORV_CHOICE}"
+	echo LH_BACKEND='"'${LH_BACKEND}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+
+orv_help_backend() {
+
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "About the backends" \
+--msgbox "\n\
+The TAIL backend \n\
+================ \n \n\
+With this backend logsend detects changes using the 'tail' command \
+and analysing its output. \
+It doesn't need any particular kernel version or packages \
+to be installed, so you can always switch to TAIL if \
+you are using an older system or a non-linux kernel. \
+Also, this is recommended for high-activity servers.\n \n\
+\
+The INOTIFY backend \n\
+=================== \n \n\
+This backend is designed mainly for home users who don't want \
+logsend to keep checking the files, unless they change.\n \n\
+What is Inotify \n\
+--------------- \n \n\
+Inotify is a Linux kernel subsystem that provides file system \
+event notification. See 'http://en.wikipedia.org/wiki/Inotify' \
+for more details. \n \n\
+Do you have it? \n\
+--------------- \n \n\
+Chances are that it is built into your kernel and running \
+if the kernel version is >= 2.6.13. To find out if it is compiled \
+into the kernel, do these: \n\
+    zgrep INOTIFY /proc/config.gz \n\
+or: \n\
+    grep INOTIFY /boot/your-kernel-config-file. \n\
+or, on Gentoo systems: \n\
+    grep INOTIFY /etc/kernels/your-kernel-config-file \n\
+You should see 'CONFIG_INOTIFY=y' \n \n\
+Is it running? \n\
+-------------- \n \n\
+If /proc/sys/fs/inotify exists, inotify is enabled. In older \
+versions it used a device node, /dev/inotify or \
+/dev/misc/inotify, so you may want to check for that too.\n \n\
+Using it \n\
+-------- \n \n\
+logsend uses the 'inotifywait' command, provided by \
+'inotify-tools', so please install 'inotify-tools'. \
+You can get it from here: 'http://inotify-tools.sourceforge.net'\n \n\
+\
+The SIMPLE backend \n\
+================== \n \n\
+Will check the files periodically to detect line additions. \
+The time period between two consecutive checks is the e-mail \
+delay. Don't use it on rotated files.\n \n\
+" \
+0 0
+}
+
+
+
+orv_dialog_adv_conf() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Advanced configuration" \
+--cancel-label "Back" \
+--default-item "1" \
+--menu "\nHere you can optimise logsend for your system and for your eyes.\n \n" \
+0 0 0 \
+"1" " Backend to use       " \
+"2" " Get meantime changes " \
+"3" " Colour themes        " 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_dialog_change_colours() {
+	# after upgrading, themes are in another location and can't be found.
+	[ ! -r "${DIALOGRC}" ] && unset DIALOGRC
+
+	for ORV_ONE_DIALOGRC in dark blue_cyan blue_white bw cyan_contrast cyan_pale debianish
+	do
+		if [ "${DIALOGRC}" = "${DESTDIR}/share/${ORV_PKG_NAME}/themes/dialogrc_${ORV_ONE_DIALOGRC}" ]
+		then
+
+			export "ORV_DIALOG_THEME_STATUS_${ORV_ONE_DIALOGRC}"="on"
+			ORV_DIALOG_THEME_DEFAULT="off"
+		else
+			export "ORV_DIALOG_THEME_STATUS_${ORV_ONE_DIALOGRC}"="off"
+		fi
+
+	done
+
+	# if the user explicitly disabled colours.
+	[ -z "${DIALOGRC}" ] && ORV_DIALOG_THEME_DEFAULT="on"
+
+
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Colour themes" \
+--radiolist "\nHere you can set the colours of this interface.\n \n" \
+0 0 0 \
+"dark" "" "${ORV_DIALOG_THEME_STATUS_dark}" \
+"debianish" "" "${ORV_DIALOG_THEME_STATUS_debianish}" \
+"blue_cyan" "" "${ORV_DIALOG_THEME_STATUS_blue_cyan}" \
+"blue_white" "" "${ORV_DIALOG_THEME_STATUS_blue_white}" \
+"cyan_contrast" "" "${ORV_DIALOG_THEME_STATUS_cyan_contrast}" \
+"cyan_pale" "" "${ORV_DIALOG_THEME_STATUS_cyan_pale}" \
+"--- Use dialog defaults ---" "" "${ORV_DIALOG_THEME_DEFAULT}" \
+"--- Disable colours ---" "" "${ORV_DIALOG_THEME_STATUS_bw}" \
+2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+[ "${ORV_RETVAL}" = "0" ] && ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_set_colours() {
+	for ORV_ONE_DIALOGRC in dark blue_cyan blue_white cyan_contrast cyan_pale debianish sourcemage
+	do
+		[ "${ORV_CHOICE}" = "${ORV_ONE_DIALOGRC}" ] && export DIALOGRC="${DESTDIR}/share/${ORV_PKG_NAME}/themes/dialogrc_${ORV_ONE_DIALOGRC}"
+	done
+
+	case ${ORV_CHOICE} in
+		'--- Use dialog defaults ---')
+			unset DIALOGRC
+		;;
+		'--- Disable colours ---')
+			export DIALOGRC="${DESTDIR}/share/${ORV_PKG_NAME}/themes/dialogrc_bw"
+		;;
+	esac
+
+	echo DIALOGRC='"'${DIALOGRC}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+
+orv_dialog_meantime() {
+	case ${LH_GET_MEANTIME} in
+	'1')
+		ORV_DIALOG_MEANTIME_STATUS="on"
+		ORV_DIALOG_FRESH_STATUS="off"
+	;;
+	*)
+		ORV_DIALOG_MEANTIME_STATUS="off"
+		ORV_DIALOG_FRESH_STATUS="on"
+	;;
+	esac
+
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Get meantime changes" \
+--radiolist "\nIf logsend was stopped for any reason, \
+when it starts again it can check the files to watch \
+and send any modifications which occured in the meantime. \
+However, this will work only if the files weren't \
+rotated, and only with the INOTIFY and SIMPLE backends.\n \n" \
+0 0 0 \
+"Get meantime changes" "" "${ORV_DIALOG_MEANTIME_STATUS}" \
+"Always do a fresh start" "" "${ORV_DIALOG_FRESH_STATUS}" \
+2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+[ "${ORV_RETVAL}" = "0" ] && ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_set_meantime() {
+	case ${ORV_CHOICE} in
+	'Get meantime changes')
+		LH_GET_MEANTIME="1"
+	;;
+	'Always do a fresh start')
+		LH_GET_MEANTIME="0"
+	;;
+	esac
+	echo LH_GET_MEANTIME='"'${LH_GET_MEANTIME}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+
+orv_dialog_internal() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Internal settings" \
+--cancel-label "Back" \
+--default-item "1" \
+--menu "\nYou should change these settings only if you are familiar \
+with 'grep', 'tail' and 'inotify-tools'. \
+NOTE: Altering these settings may break logsend's \
+functionality. Do not send bug reports if you changed them.\n \n" \
+0 0 0 \
+"1" " Extra options for grep              " \
+"2" " Extra options for tail              " \
+"3" " Inotifywait options for files       " \
+"4" " Inotifywait options for directories " 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_dialog_extra_grep() {
+[ -z "${LH_GREP_EXTRA_OPTS}" ] && LH_GREP_EXTRA_OPTS="-e"
+
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Extra options for grep" \
+--inputbox "\nIf you need extra options to pass to 'grep' \
+while searching for strings in files, enter them here. You can leave \
+it blank for default (-e). This will apply to all the backends.\n \n" \
+0 0 "${LH_GREP_EXTRA_OPTS}" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+[ "${ORV_RETVAL}" = "0" ] && ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+orv_set_extra_grep() {
+	LH_GREP_EXTRA_OPTS="${ORV_CHOICE}"
+	[ -z "${LH_GREP_EXTRA_OPTS}" ] && LH_GREP_EXTRA_OPTS="-e"
+	echo LH_GREP_EXTRA_OPTS='"'${LH_GREP_EXTRA_OPTS}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+
+orv_dialog_extra_tail() {
+[ -z "${LH_TAIL_EXTRA_OPTS}" ] && LH_TAIL_EXTRA_OPTS="--sleep-interval=1 --follow=name --retry --quiet"
+
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Extra options for tail" \
+--inputbox "\nIf you need to change the default options for the 'tail' \
+command, enter them here. You can leave it blank for default. This will \
+apply to the TAIL backend.\n \n" \
+0 0 "${LH_TAIL_EXTRA_OPTS}" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+[ "${ORV_RETVAL}" = "0" ] && ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+orv_set_extra_tail() {
+	LH_TAIL_EXTRA_OPTS="${ORV_CHOICE}"
+	[ -z "${LH_TAIL_EXTRA_OPTS}" ] && LH_TAIL_EXTRA_OPTS="--sleep-interval=1 --follow=name --retry --quiet"
+	echo LH_TAIL_EXTRA_OPTS='"'${LH_TAIL_EXTRA_OPTS}'"' >> "${ORV_DLG_TMPCONF}"
+}
+
+
+orv_dialog_inotify_opts_files() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Inotifywait options for FILES" \
+--inputbox "\nHere you can entirely change the options \
+passed to inotifywait while watching FILES. These options \
+include the events to be caught. This will \
+apply to the INOTIFY backend.\n \n" \
+0 0 "${LH_INOTIFY_FILE_OPTS}" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+[ "${ORV_RETVAL}" = "0" ] && ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_set_inotify_opts_files() {
+	if [ ! -z "${ORV_CHOICE}" ]
+	then
+		LH_INOTIFY_FILE_OPTS="${ORV_CHOICE}"
+		echo LH_INOTIFY_FILE_OPTS='"'${LH_INOTIFY_FILE_OPTS}'"' >> "${ORV_DLG_TMPCONF}"
+	fi
+}
+
+
+
+orv_dialog_inotify_opts_dirs() {
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Inotifywait options for DIRECTORIES" \
+--inputbox "\nHere you can entirely change the options \
+passed to inotifywait while watching DIRECTORIES. These options \
+include the events to be caught. This will \
+apply to the INOTIFY backend.\n \n" \
+0 0 "${LH_INOTIFY_DIR_OPTS}" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+[ "${ORV_RETVAL}" = "0" ] && ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+orv_set_inotify_opts_dirs() {
+	if [ ! -z "${ORV_CHOICE}" ]
+	then
+		LH_INOTIFY_DIR_OPTS="${ORV_CHOICE}"
+		echo LH_INOTIFY_DIR_OPTS='"'${LH_INOTIFY_DIR_OPTS}'"' >> "${ORV_DLG_TMPCONF}"
+	fi
+}
+
+
+
+orv_dialog_no_file_chosen() {
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "No file chosen" \
+--msgbox "\nYou must enter at least a file to monitor first. \
+Go to 'Basic configuration' -> 'Files to watch' \
+and add a file to the list.\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+}
+
+
+
+orv_dialog_live_monitor() {
+	if [ -z "${LH_FILES}" ]
+	then
+		orv_dialog_no_file_chosen
+		break
+	fi
+
+${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Live monitor" \
+--ok-label "Start monitor" \
+--cancel-label "Back" \
+--menu "\nChoose a file to monitor from the list below.\n\
+NOTE 1: Your settings will apply here too.\n\
+NOTE 2: The live monitor doesn't send e-mails.\n \n" \
+0 0 0 \
+$(orv_dialog_list_files) \
+"" "" 2> "${ORV_DLG_TMPFILE}"
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_dialog_no_inotifywait() {
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "inotify-tools not installed" \
+--msgbox "\nYou specified a directory to watch but this is \
+possible only using inotify-tools, which is not \
+installed. Please install inotify-tools first.\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+}
+
+
+
+orv_dialog_tailbox() {
+
+
+	[ -z "${ORV_CHOICE}" ] && return
+	ORV_CHOICE="$((${ORV_CHOICE}-1))"
+	LH_LOG_FILE="${LH_FILES_ARRAY[${ORV_CHOICE}]}"
+	LH_GREP="${LH_GREP_STRINGS_ARRAY[${ORV_CHOICE}]}"
+
+	if [ -d "${LH_LOG_FILE}" ]
+	then
+		if ! command -v "inotifywait" > /dev/null 2>&1
+		then
+			orv_dialog_no_inotifywait
+			return
+		fi
+	fi
+
+	if [ ! -r "${LH_LOG_FILE}" ]
+	then
+		ORV_FILE_TO_POINT="${LH_LOG_FILE}"
+		orv_dialog_not_readable
+		return
+	fi
+
+	# now lets do the tricks.
+
+	LH_MAXSIZE="$(stty -a | head -n 1)"
+
+	# set our vars for dialog box size, preserveing some lines for
+	# title and margins; 
+	LH_HEIGHT=$(($(echo ${LH_MAXSIZE} | awk '{ print $"5" }' | tr -d ';')-7))
+	LH_WIDTH=$(($(echo ${LH_MAXSIZE} | awk '{ print $"7" }' | tr -d ';')-12))
+	LH_TEXT_WIDTH=$((${LH_WIDTH}-4))
+	[ "${LH_HEIGHT}" -le "5" ] && return
+	[ "${LH_WIDTH}" -le "16" ] && return
+
+
+		# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		# these are the files we will work with
+		# (LH_LOG_FILE is used as a dir only when watching dirs) 
+
+		# used by all.
+
+		# make sure all temp files will be in user-conf, not to override any running instance of logsend.
+		export LH_LOG_FILE_DIR="${ORV_DIALOG_TEMP_DIR}/$$"
+		export LH_LOCK_CHECK="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.check" 
+
+		# simple + inotify(FILE) + tail
+		export LH_LOG_FILE_TO_SEND="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.send"
+		export LH_LOG_FILE_TO_SEND_MV="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.send.mv"
+
+		# inotify(FILE) + tail
+		export LH_WRITTEN_COUNTER="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.counter" 
+
+		# simple + inotify(FILE) 
+		export LH_LOG_FILE_CUT="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.cut"
+
+		# inotify(FILE)
+		export LH_LOCK_INOTIFY="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.inotify" 
+		export LH_LOCK_SLEEP="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.sleep" 
+		export LH_WRITTEN_SIZE="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.size" 
+
+		# inotify(DIR)
+		export LH_DIR_OUTFILE="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}/.dirout"
+
+		# inotify(FILE) + inotify(DIR)
+		export LH_LOCK_MV="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}/.lmv"
+
+		# tail
+		export LH_TAIL_ERRFIFO="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.tail.errfifo"
+		export LH_TAIL_OUTFILE="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.tail.out"
+		export LH_LOCK_TRUNCATION="${LH_LOG_FILE_DIR}/${LH_LOG_FILE}.truncation" 
+
+		rm -rf "${LH_LOG_FILE_DIR}"
+
+		mkdir --parents "${LH_LOG_FILE_DIR}/${LH_LOG_FILE}" > /dev/null 2>&1
+		mkdir --parents "${LH_LOG_FILE_DIR}/$(dirname ${LH_LOG_FILE})" > /dev/null 2>&1
+
+		chown -R "${USER}" "${LH_LOG_FILE_DIR}"/
+		chmod -R 700 "${LH_LOG_FILE_DIR}"/
+
+		# minimalistic test of extra options (existence)
+		[ -z "${LH_GREP_EXTRA_OPTS}" ] && export LH_GREP_EXTRA_OPTS="-e"
+
+		# just for safety
+		rm -f "${LH_LOCK_CHECK}"
+		rm -f "${LH_LOCK_INOTIFY}"
+		rm -f "${LH_LOCK_SLEEP}"
+		rm -f "${LH_LOCK_MV}"
+
+
+	# I bet someone will exit the monitor window by CTRL-C
+	LH_SUBSHELL_PID=$$
+
+	lh_kill_live_procs() {
+		trap - INT TERM EXIT QUIT ABRT	
+
+		# get the list of the logsen-config PIDS and use only our session ID,
+		# not to kill all the live monitors out there.
+		LH_CONFIG_PIDS=$(pgrep -f -x "/bin/bash ./logsend-config" -u "${USER}" -d " " -s "0")
+
+		# LH_SUBSHELL_PID is the main parent; it shouldn't be killed;
+
+			for LH_ONE_CONFIG_PID in ${LH_CONFIG_PIDS} ; do
+
+				if [ "${LH_SUBSHELL_PID}" != "${LH_ONE_CONFIG_PID}" ] ; then
+					# ok get its children.
+					LH_CONFIG_CHILDREN=$(pgrep -P ${LH_ONE_CONFIG_PID})
+					# and get the grandsons, if any.
+					for LH_ONE_CONFIG_CHILD in ${LH_CONFIG_CHILDREN} ; do
+						LH_GRANDSONS=$(pgrep -P ${LH_ONE_CONFIG_CHILD})
+						LH_ALL_GRANDSONS="${LH_ALL_GRANDSONS} ${LH_GRANDSONS}"
+					done
+					# add these children to the list of all children.
+					LH_ALL_CHILDREN="${LH_ALL_CHILDREN} ${LH_CONFIG_CHILDREN}"
+					# and add this parent to the list of valid parents.
+					LH_PARENTS="${LH_PARENTS} ${LH_ONE_CONFIG_PID}"
+				fi
+			done
+
+
+		# kill them all, starting with the parents.
+		for ORV_ONE_PROC in ${LH_PARENTS} ${LH_ALL_CHILDREN} ${LH_ALL_GRANDSONS} ; do
+			 while kill -0 "${ORV_ONE_PROC}" 2> /dev/null ; do
+				kill "${ORV_ONE_PROC}" > /dev/null 2>&1
+			 done
+		done
+		
+		exec 2>&6 6>&-
+		rm -rf "${LH_LOG_FILE_DIR}"
+	}
+
+	# hide stderr before & after stetting the trap.
+	exec 6>&2 ; exec 2> /dev/null
+	trap lh_kill_live_procs INT TERM EXIT QUIT ABRT
+	exec 6>&2 ; exec 2> /dev/null
+
+	orv_dialog_do_tail() {
+		orv_dialog_dots_pre() {
+			# some beautifying dots.
+			ORV_COUNT_DOTS_PER_LINE="1"
+			while [ "${ORV_COUNT_DOTS_PER_LINE}" -le "${LH_TEXT_WIDTH}" ]
+			do
+				ORV_ONE_DOTS_LINE="${ORV_ONE_DOTS_LINE}."
+				ORV_COUNT_DOTS_PER_LINE="$((${ORV_COUNT_DOTS_PER_LINE}+1))"
+			done
+			ORV_COUNT_DOTS_LINES="1"
+			while [ "${ORV_COUNT_DOTS_LINES}" -le "${LH_HEIGHT}" ]
+			do
+				ORV_COUNT_DOTS_LINES="$((${ORV_COUNT_DOTS_LINES}+1))"
+				echo "${ORV_ONE_DOTS_LINE}" >> "${LH_LIVE_OUT}" 
+			done
+			echo >> "${LH_LIVE_OUT}" ; echo "$(date); live monitor started." >> "${LH_LIVE_OUT}" ; echo "----------------------------------------------------" >> "${LH_LIVE_OUT}" ; echo >> "${LH_LIVE_OUT}"
+		}
+
+		# announce the backends to be sourced that we are in LIVE mode.
+		LH_LIVE_MON="1"
+		LH_GET_MEANTIME="0"
+
+		if [ -d "${LH_LOG_FILE}" ]
+		then
+			LH_LIVE_OUT="${LH_LOG_FILE_TO_SEND}"
+
+			{ orv_dialog_dots_pre ;
+			source "${DESTDIR}/lib/${ORV_PKG_NAME}/backend-simple" ;
+			source "${DESTDIR}/lib/${ORV_PKG_NAME}/backend-inotify" ;
+			lh_call_inodir ; } & 
+		else
+			LH_LIVE_OUT="${LH_LOG_FILE_TO_SEND_MV}"
+
+			{ orv_dialog_dots_pre ;
+			source "${DESTDIR}/lib/${ORV_PKG_NAME}/backend-tail" ;
+			lh_call_tail ; } & 
+		fi
+	}
+	orv_dialog_do_tail  
+
+	touch "${LH_LIVE_OUT}"
+
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}"  \
+	--title "Live monitoring: ${LH_LOG_FILE}" \
+	--tailbox "${LH_LIVE_OUT}" "${LH_HEIGHT}" "${LH_WIDTH}"
+
+	lh_kill_live_procs
+}
+
+
+
+orv_dialog_send_test_mail() {
+	LH_MAIL_ADDRESS_TO_TEST="${LH_MAIL_ADDRESS}"
+	orv_mail_address_test
+
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Send a test e-mail" \
+--yesno "\nSending a test e-mail is a good idea as you will\n\
+know for sure if your MTA (Mail Transport Agent)\n\
+is working and if the mail traffic is allowed by\n\
+the firewall.\n\n\
+Send an e-mail to ${LH_MAIL_ADDRESS} now?\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+}
+
+
+
+orv_send_test_mail() {
+
+	LH_MAIL_SUBJECT_TEST="${HOSTNAME}: Test e-mail sent by ${ORV_SCRIPT_NAME}"
+	LH_SIGNATURE="\n\n-- \n___________________________________________________________\nE-mail sent by ${ORV_SCRIPT_NAME}.     Homepage: http://logsend.sf.net \n"	
+
+	LH_MAIL_CONTENT="Hi. This is a test e-mail from ${USER}@${HOSTNAME}. Receiving this message proves that your MTA is working and the mail traffic is allowed by the firewall. \n"	
+
+	echo -e "${LH_MAIL_CONTENT} ${LH_SIGNATURE}" |
+	mail -s "${LH_MAIL_SUBJECT_TEST}" "${LH_MAIL_ADDRESS}"
+}
+
+
+
+orv_dialog_test_mail_sent() {
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "E-mail sent" \
+--msgbox "\nAn e-mail was sent to ${LH_MAIL_ADDRESS}.\n\
+Please check your inbox.\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+}
+
+
+
+orv_dialog_about() {
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "About" \
+--msgbox "\n${ORV_SCRIPT_NAME} ${ORV_SCRIPT_VERSION} - a daemon for e-mail\n\
+notification of log file changes.\n\n\
+This program is distributed under\n\
+the terms of the GPL v2.\n\n\
+Feel free to send me your feedback,\n\
+suggestions, bugs.\n\n\
+Homepage:\n\
+http://logsend.sourceforge.net\n\n\
+(c) 2006-2007 Daniel Butzu\n\
+orveldv@users.sourceforge.net\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+}
+
+
+
+orv_dialog_restore() {
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Restore defaults" \
+--defaultno \
+--yesno "\nThis is an option of last resort, to use \n\
+only when your settings get messed up. After \n\
+restoring defaults, you will have to enter \n\
+again the 'Basic configuration', add the \n\
+files to watch and set your e-mail address. \n\n\
+Restore defaults now?\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+ORV_CHOICE="$(cat ${ORV_DLG_TMPFILE})"
+
+[ "${ORV_RETVAL}" = "0" ] && source "${DESTDIR}/share/${ORV_PKG_NAME}/logsend.conf.default"
+}
+
+
+
+orv_dialog_incompatible_backend() {
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "Incompatible backend" \
+--msgbox "\nYou specified \
+${ORV_FILE_TO_POINT} to be watched, which is a directory. \
+Watching directories is possible only using the INOTIFY \
+backend. You should either switch to INOTIFY or remove \
+${ORV_FILE_TO_POINT} from the list of files to watch.\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+}
+
+
+
+orv_dialog_no_inotify_backend() {
+	${ORV_DIALOG} --backtitle "${ORV_DIALOG_BACKTITLE}" --clear \
+--title "inotify-tools not installed" \
+--msgbox "\nYou chose the INOTIFY backend, but inotify-tools \
+is not installed. You should either choose other backend or \
+install inotify-tools.\n\n" \
+0 0 
+
+ORV_RETVAL=$?
+}
+
+
+
+orv_final_tests() {
+
+# when user exits, we check for settings consistency:
+# 1. all files readable
+# 2. delays in sleep format
+# 3. e-mail format
+# 4. presence of inotifywait if inotify chosen
+# 5. backend / files-dirs compatibility
+
+# 1.
+	ORV_YES_NONREAD="0"
+	for ORV_TEST_THIS_FILE in ${LH_FILES}
+	do
+		if [ ! -r "${ORV_TEST_THIS_FILE}" ]
+		then
+			ORV_FILE_TO_POINT="${ORV_TEST_THIS_FILE}"
+			ORV_YES_NONREAD="1"
+			orv_dialog_not_readable
+
+		fi
+	done
+	[ "${ORV_YES_NONREAD}" = "1" ] && continue
+
+# 2.
+	ORV_YES_NONSLEEP="0"
+	for ONE_SLEEP_TIME in ${LH_MAIL_DELAYS}
+	do
+		orv_sleep_format_test
+	done
+	[ "${ORV_YES_NONSLEEP}" = "1" ] && continue
+
+# 3.
+	LH_MAIL_ADDRESS_TO_TEST="${LH_MAIL_ADDRESS}"
+	orv_mail_address_test
+
+# 4.
+	ORV_YES_NOINOTIFY="0"
+	if [ "${LH_BACKEND}" = "inotify" ]
+	then
+		if ! command -v "inotifywait" > /dev/null 2>&1
+		then
+			ORV_YES_NOINOTIFY="1"
+			orv_dialog_no_inotify_backend
+		fi
+	fi
+	[ "${ORV_YES_NOINOTIFY}" = "1" ] && continue
+
+# 5.
+	ORV_YES_TAILDIR="0"
+	if [ "${LH_BACKEND}" = "tail" ] || [ "${LH_BACKEND}" = "simple" ]
+	then
+		for ORV_TEST_THIS_FILE in ${LH_FILES}
+		do
+			if [ -d "${ORV_TEST_THIS_FILE}" ]
+			then
+				ORV_FILE_TO_POINT="${ORV_TEST_THIS_FILE}"
+				ORV_YES_TAILDIR="1"
+				orv_dialog_incompatible_backend
+			fi
+		done
+	fi
+	[ "${ORV_YES_TAILDIR}" = "1" ] && continue
+}
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+	orv_files_conversion
+	orv_dialog_welcome
+	case ${ORV_RETVAL} in
+	0)
+		while true
+		do
+			orv_dialog_main
+			case ${ORV_RETVAL} in
+			0)
+				case ${ORV_CHOICE} in
+				'1')
+					while true
+					do
+						orv_dialog_base_conf
+						case ${ORV_RETVAL} in
+						'0')
+							case ${ORV_CHOICE} in
+							'1')
+								while true
+								do
+									orv_files_conversion
+									orv_dialog_files
+									case "${ORV_CHOICE}" in 
+									*HELP*)
+										while true
+										do
+											orv_dialog_add_file
+											case ${ORV_RETVAL} in
+											'0')
+												orv_arrange_arrays_add
+												unset ORV_CHOICE ORV_RETVAL 
+												break
+											;;
+											'1'|'255')	
+												unset ORV_CHOICE ORV_RETVAL 
+												break
+											;;
+											esac
+										done
+									;;
+									esac
+									case "${ORV_RETVAL}" in
+									'0')
+										orv_arrange_arrays_remove
+									;;
+									'1'|'255')
+										unset ORV_CHOICE ORV_RETVAL 
+										break
+									;;
+									esac
+								done
+							;;
+							'3')
+								while true
+								do
+									orv_files_conversion
+									orv_dialog_strings
+									case "${ORV_CHOICE}" in 
+									*HELP*)
+										orv_dialog_grep_help 
+										unset ORV_CHOICE ORV_RETVAL 
+										continue
+									;;
+									esac
+									case ${ORV_RETVAL} in
+									'0')
+										orv_which_file
+											orv_dialog_edit_string
+											case ${ORV_RETVAL} in
+											'0')
+												orv_set_this_grep
+												
+											;;
+											esac
+									;;
+									'1'|'255')
+										unset ORV_CHOICE ORV_RETVAL 
+										break
+									;;
+									esac
+								done
+								;;
+							'4')
+								while true
+								do
+									orv_files_conversion
+									orv_dialog_sleeps
+									case "${ORV_CHOICE}" in 
+									*HELP*)
+										orv_dialog_sleep_help 
+										unset ORV_CHOICE ORV_RETVAL 
+										continue
+									;;
+									esac
+									case ${ORV_RETVAL} in
+									'0')
+										orv_which_file
+											orv_dialog_edit_sleep
+											case ${ORV_RETVAL} in
+											'0')
+												orv_set_this_sleep
+												
+											;;
+											esac
+									;;
+									'1'|'255')
+										unset ORV_CHOICE ORV_RETVAL 
+										break
+									;;
+									esac
+								done
+							;;
+							'2')
+								while true
+								do
+									orv_dialog_email_address
+									case ${ORV_RETVAL} in
+									'0')
+										orv_set_email_address
+										unset ORV_CHOICE ORV_RETVAL 
+										break
+									;;
+									'1'|'255')
+										unset ORV_CHOICE ORV_RETVAL 
+										break
+									esac
+								done
+							;;
+							esac
+						;;
+						*)
+							unset ORV_CHOICE ORV_RETVAL 
+							break
+						;;
+						esac
+					done
+				;;
+				'2')
+					while true
+					do
+						orv_dialog_adv_conf
+						case ${ORV_RETVAL} in
+						'0')
+							case ${ORV_CHOICE} in
+							'1')
+								while true
+								do
+									orv_dialog_backend
+									case "${ORV_CHOICE}" in 
+									*HELP*)
+										orv_help_backend
+										unset ORV_CHOICE ORV_RETVAL 
+										continue
+									;;
+									esac
+									case ${ORV_RETVAL} in
+									'0')
+										orv_set_backend
+										break
+										unset ORV_CHOICE ORV_RETVAL 
+									;;
+									'1'|'255')
+										unset ORV_CHOICE ORV_RETVAL 
+										break
+									;;
+									esac
+								done
+							;;
+							'3')
+									orv_dialog_change_colours
+									case ${ORV_RETVAL} in
+									'0')
+										orv_set_colours
+										
+									;;
+									esac
+							;;
+							'2')
+									orv_dialog_meantime
+									case ${ORV_RETVAL} in
+									'0')
+										orv_set_meantime
+										
+									;;
+									esac
+							;;
+							esac
+						;;
+						'1'|'255')
+							unset ORV_CHOICE ORV_RETVAL 
+							break
+						;;
+						esac
+					done	
+				;;
+				'3')
+					while true
+					do
+						orv_dialog_internal
+						case ${ORV_RETVAL} in
+						'0')
+							case ${ORV_CHOICE} in
+							'1')
+								orv_dialog_extra_grep
+								case ${ORV_RETVAL} in
+								'0')
+									orv_set_extra_grep
+								;;
+								esac
+							;;
+							'2')
+								orv_dialog_extra_tail
+								case ${ORV_RETVAL} in
+								'0')
+									orv_set_extra_tail
+								;;
+								esac
+							;;
+							'3')
+								orv_dialog_inotify_opts_files
+								case ${ORV_RETVAL} in
+								'0')
+									orv_set_inotify_opts_files
+								;;
+								esac 
+							;;
+							'4')
+								orv_dialog_inotify_opts_dirs
+								case ${ORV_RETVAL} in
+								'0')
+									orv_set_inotify_opts_dirs
+								;;
+								esac
+							;;
+							esac
+						;;
+						'1'|'255')
+							unset ORV_CHOICE ORV_RETVAL 
+							break
+						;;
+						esac
+					done
+				;;
+				'4')
+					orv_dialog_send_test_mail
+					case ${ORV_RETVAL} in
+					'0')
+						orv_send_test_mail
+						orv_dialog_test_mail_sent
+					;;
+					esac
+				;;
+				'5')	
+					while true 
+					do
+						orv_dialog_live_monitor
+							case ${ORV_RETVAL} in
+							'0')
+								orv_dialog_tailbox 
+							;;
+							*)
+								unset ORV_CHOICE ORV_RETVAL 
+								break
+							esac
+					done
+				;;
+				'6')
+					orv_dialog_restore
+				;;
+				'7')
+					orv_dialog_about
+				;;
+				esac
+			;;
+			1|255)
+				orv_dialog_exit
+				case ${ORV_RETVAL} in
+				'0')
+					orv_final_tests
+					orv_save_settings
+					orv_clean_temps
+					exit 0
+				;;
+				*)
+					orv_clean_temps
+					exit 0
+				;;
+				esac
+			;;
+			esac
+		done
+	;;
+	255)
+		exit 0
+	;;	
+	esac
+
+
+
+
+
+# -------------------------------------
+# prefix section
+

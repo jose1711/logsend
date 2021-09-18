@@ -1,0 +1,481 @@
+
+
+
+
+
+
+README file for logsend 1.0
+Here you can find the complete documentation about installing and using
+logsend.
+
+  1. Requirements
+  1.1 Bash
+  1.2 Dialog
+  1.3 MTA
+  1.4 Mailx
+  1.5 Tail
+  1.6 Awk
+  1.7 Inotify-tools
+
+
+  2. Installation
+  2.1 All_Linux_distributions
+
+
+  3. Configuration
+  3.1 Using_the_dialog_interface
+  3.1.1 Files_to_watch_and_e-mail_address
+  3.1.2 Send_a_test_e-mail
+  3.1.3 Other_settings_(optional)
+  3.1.3.1 Strings_to_search
+  3.1.3.2 E-mail_delays
+  3.1.3.3 Backend_to_use_+_A_word_on_inotify
+  3.1.3.4 Colour_themes
+  3.2 Manual_configuration
+
+
+  4. Usage
+  4.1 Starting_logsend
+  4.2 Automatic_startup_at_boot_time
+
+
+  5. Tips_&_Tricks
+  5.1 Hints_for_watching_various_activity
+  5.2 Searching_for_multiple_patterns_in_the_same_file
+  5.3 Watching_full_directories
+
+
+
+
+
+*** 1. Requirements ***
+
+
+
+
+1.1 Bash ________
+
+Since logsend is written in bash, you will need a decent version of it. The
+oldest bash version used for testing was 2.05a.0.
+
+
+
+1.2 Dialog ________
+
+Dialog is required only if you want to use the configuration interface. You are
+strongly advised to use it and install a decent dialog version; the oldest
+dialog version used for testing was 0.9a-20020309a.
+Since logsend will try to send e-mails, you should have these mail-related
+packages installed (and configured):
+
+
+
+1.3 MTA ________
+
+Mail Transport Agent: it can be postfix, qmail, sendmail or other. Probably
+there is one installed already. If not, get postfix, seems to be the easiest to
+install.
+
+
+
+1.4 Mailx ________
+
+The mail command is usually provided by the mailx package.
+
+
+
+1.5 Tail ________
+
+Since tail is part of coreutils it is likely that you have it; but check its
+version. Old versions of tail make no difference between stdout and stderr. The
+oldest version used for testing was 5.2.1.
+
+
+
+1.6 Awk ________
+
+You probably already have it. Type: "awk" and you should see the usage.
+
+
+
+1.7 Inotify-tools ________
+
+You will need it only if you want to use the INOTIFY backend. You can get it
+from here: http://inotify-tools.sourceforge.net.
+
+
+
+
+*** 2. Installation ***
+
+
+
+
+2.1 All Linux distributions ________
+
+For installing into the default location (/usr/local), or other locations for
+which a regular user doesn't have write permission, you have to log in as
+'root' first. After getting the archive from http://logsend.sourceforge.net,
+extract it and install logsend:
+
+      tar xzf logsend-x.y.tar.gz
+      cd logsend-x.y.tar.gz
+      make install
+
+This will install logsend into /usr/local. If you want to use another location,
+specify it using the ${prefix} variable, for example:
+
+      prefix=/opt make install
+
+will install it into /opt/logsend-x.y/
+If you don't have "make" installed or preffer not to use it, you can call the
+"install.sh" script directly:
+
+      ./install.sh -i
+
+Or, for using other location than /usr/local:
+
+      prefix=/opt ./install.sh -i
+
+You may want to keep this extracted archive on your filesystem; if you change
+your mind later and want to uninstall logsend, you will be able to do it this
+way:
+
+      prefix=/opt make uninstall
+
+Or:
+
+      prefix=/opt ./install.sh -u
+
+
+
+
+
+*** 3. Configuration ***
+
+Always remember that each user can run his / her own instance of logsend, so
+you should configure it as the same user you plan to use it. Also, this user
+needs read permission on the files to watch; and this is something a regular
+user usually doesn't have when it comes about the system's log files.
+The recommended method of configuration is using the dialog based interface,
+since it will get you starting quick and easy. However, if you preffer not to
+use it, skip to the "Manual_configuration" section. A major benefit of the
+interface is that if you happen to make a mistake while configuring (typo or
+other), you will be prompted and can immediately fix it. If you make a mistake
+during the manual configuration, however, you will be warned when you will try
+to start logsend.
+
+
+
+3.1 Using the dialog interface ________
+
+Fire up the interface:
+
+      logsend config
+
+Now go to the first item ("Basic configuration") and set the files to watch and
+your e-mail address.
+
+
+
+3.1.1 Files to watch and e-mail address ________
+
+These are the most important settings: logsend will need to know what files you
+need it to supervise, and also what is your e-mail address, so that it will be
+able to send you the notifications. Add the files to the list, one by one, and
+type their full path. Take your time, once you will be done there won't be many
+other things left to do.
+Also make sure you enter your precise e-mail address, the interface will only
+check its format, but there won't be any way of knowing about your typos.
+
+
+
+3.1.2 Send a test e-mail ________
+
+Since you finished setting the above, you should send a test e-mail to make
+sure you will receive the forthcoming notifications sent by Logsend. Do it now:
+go to the main menu, item 4. If you received it, you're done: exit and save the
+settings (and skip to the "Starting_logsend" section). But if you didn't, there
+are some things you may want to check:
+
+  - Did you enter your e-mail address correctly in the "E-mail address"
+  section?
+  - Did you look to the Spam / Bulk / Junk folder of your e-mail account?
+  - Do you have a working MTA (Mail Transport Agent)? I.e., is there installed
+  any package like postfix, qmail or sendmail? If it is, did you configure it
+  properly? You should really pay attention to this; once it is fully
+  functional (and secured), it will be your partner for a lifetime. But is not
+  the purpose of this manual to help you doing it.
+  - Does your local firewall allow outgoing connections on port 25 (SMTP)? Many
+  linux firewalls allow all outgoing connections by default, however, you
+  should make sure this is also your case.
+
+
+
+
+3.1.3 Other settings (optional) ________
+
+In this section are described some things you can do to tweak logsend's
+behaviour. If you're in a hurry, you can skip it and go to "Starting_logsend".
+
+
+
+3.1.3.1 Strings to search ________
+
+While watching a file for changes, you may not be interested in all the lines
+added to the file, but only in the lines that contain a certain word (or
+string). For example, you need to watch the /var/log/auth.log file to know who
+and when logs in, but you are interested only in the remote logins, via ssh; in
+this case the string to search for is 'ssh', and an e-mail will be sent when
+lines containing 'ssh' will be added to auth.log.
+
+
+
+3.1.3.2 E-mail delays ________
+
+Sometimes, if changes occur too often to a file, you will be bombed with e-
+mails. Setting a minimum delay between the e-mails to be sent will prevent this
+from happening. If you don't specify a delay, the default will be used, which
+is 10 minutes. The time format for the delay is the one used by 'sleep' (50s =
+50 seconds; 20m = 20 minutes; 5h = 5 hours; 1d = 1 day). Check the sleep man
+page for more details.
+
+
+
+3.1.3.3 Backend to use + A word on inotify ________
+
+Logsend can use different backends to detect the changes to the files. With the
+TAIL backend it detects changes using the 'tail' command and analysing its
+output. It doesn't need any particular kernel version or packages to be
+installed, so you can always switch to TAIL if you are using an older system or
+a non-linux kernel. Also, this is recommended for high-activity servers. If you
+are a home user and you have a recent kernel, you might want to use the INOTIFY
+backend which saves logsend from the trouble of making checks even if the files
+to watch didn't change. The SIMPLE backend will check the files periodically to
+detect line additions, and the time period between two consecutive checks is
+the e-mail delay. Don't use it on rotated files.
+
+
+
+
+*** A word on inotify ***
+
+
+
+
+What is it? ________
+
+Inotify is a Linux kernel subsystem that provides file system event
+notification. See http://en.wikipedia.org/wiki/Inotify for more details.
+
+
+
+Do you have it? ________
+
+Chances are that it is built into your kernel and running if the kernel version
+is >= 2.6.13. To find out if it is compiled into the kernel, do these:
+
+      zgrep INOTIFY /proc/config.gz
+
+or:
+
+      grep INOTIFY /boot/your-kernel-config-file.
+
+or, on Gentoo systems:
+
+      grep INOTIFY /etc/kernels/your-kernel-config-file
+
+You should see 'CONFIG_INOTIFY=y'
+
+
+
+Is it running? ________
+
+If /proc/sys/fs/inotify exists, inotify is enabled. In older versions it used a
+device node, /dev/inotify or /dev/misc/inotify, so you may want to check for
+that too.
+
+
+
+Using it ________
+
+Logsend uses the 'inotifywait' command, provided by 'inotify-tools', so please
+install 'inotify-tools'. You can get it from here: http://inotify-
+tools.sourceforge.net.
+-------------------------------------------------------------------------------
+
+
+
+3.1.3.4 Colour themes ________
+
+Having different themes available proves to be useful while using the live
+monitor; if you want to keep an eye continuously on several files, you can have
+multiple instances of the live monitor up and running in different terminals /
+tabs, each one having its own colour.
+
+
+
+3.2 Manual configuration ________
+
+Ok, so you chose not to use the dialog interface. First you should know that
+longsed stores its configuration file into your home directory, under
+
+      .logsend/${USER}-conf/logsend.conf
+
+If this is the first time you run logsend, you should create this directory:
+
+      mkdir --parents  ~/.logsend/${USER}-conf/
+
+Copy the default configuration file which is located under /usr/local/share/
+logsend-1.0/logsend.conf.default (if you installed into the default location),
+to the directory you created and rename it to 'logsend.conf':
+
+      cp /usr/local/share/logsend-1.0/logsend.conf.default  ~/.logsend/${USER}-
+      conf/logsend.conf
+
+Now fire up your preffered text editor and change these variables in
+'logsend.conf': 'LH_MAIL_ADDRESS', 'LH_FILES'. The file is heavily commented so
+it shouldn't be hard to figure out what to do. Optional, you can change these
+too: 'LH_BACKEND', 'LH_MAIL_DELAYS', 'LH_GREP_STRINGS' (or anything else you
+want).
+
+
+
+
+*** 4. Usage ***
+
+
+
+
+4.1 Starting logsend ________
+
+Once you're finished with the configuration, it's time to start logsend. Just
+type:
+
+      logsend start
+
+There are also other actions beside 'start', like 'stop', 'restart' and
+'status'. Use them to control it.
+
+
+
+4.2 Automatic startup at boot time ________
+
+Starting at boot time is possible if you configured logsend as the root user.
+Logsend doesn't come with an init script, since it behaves like an init script
+itself. You should link it to the proper runlevel. Eg.:
+* on Gentoo:
+
+      echo "/usr/local/bin/logsend start" >> /etc/conf.d/local.start
+      rc-update add local default
+
+This will start logsend in the default runlevel.
+* on Debian:
+
+      echo "/usr/local/bin/logsend start" > /etc/init.d/logsend
+      chmod 755 /etc/init.d/logsend
+      ln -s /etc/init.d/logsend /etc/rcS.d/S85logsend
+
+This will start logsend in all the runlevels.
+* other systems
+
+      echo "/usr/local/bin/logsend start" > /etc/init.d/logsend
+      chmod 755 /etc/init.d/logsend
+      ln -s /etc/init.d/logsend /etc/rc5.d/S85logsend
+
+This will start logsend in runlevel 5 (graphical / X)
+It will start no matter if you had a power failure or accidentaly pushed the
+'Reset' button; logsend doesn't use lock files to keep track of its status.
+
+
+
+
+*** 5. Tips & Tricks ***
+
+
+
+
+5.1 Hints for watching various activity ________
+
+Below are some examples you can use to watch certain servers' activity. They
+are only guidelines, your servers might keep logs to other files than those
+mentioned. They are written for the case of manual configuration, but if you
+use the dialog interface, it will be even easier; 'LH_FILES' reffers to the
+"Files to watch"; 'LH_GREP_STRINGS' reffers to the "Strings to search";
+'LH_MAIL_DELAYS' reffers to the "E-mail delays".
+* for watching ssh logs:
+
+  LH_FILES="/var/log/auth.log"
+  LH_GREP_STRINGS="ssh"
+
+* for watching apache-ssl logs:
+
+  LH_FILES="/var/log/apache-ssl/access.log"
+  LH_GREP_STRINGS="."
+
+* for watching mail logs (postfix) :
+
+  LH_FILES="/var/log/mail.log" (on some systems it may be "/var/log/mail/
+  mail.log")
+  LH_GREP_STRINGS="postfix" (for watching only the mail traffic)
+  LH_GREP_STRINGS="." (for watching all the mail activity)
+  LH_MAIL_DELAYS="1d" (this way you will get a daily e-mail. Note that the
+  mail-send activity of logsend will be included in the mail logs too, so
+  setting a short time between checks will make you receive nothing else but
+  the logsend activity itself.)
+
+* for watching ssh logs and su sessions:
+
+  LH_FILES="/var/log/auth.log"
+  LH_GREP_STRINGS="ssh\|su"
+
+* for watching all the authentication activity (logins: xdm, su, ssh, pam, ...
+)
+
+  LH_FILES="/var/log/auth.log"
+  LH_GREP_STRINGS="."
+
+
+
+
+5.2 Searching for multiple patterns in the same file ________
+
+As logsend calls the grep command having 'LH_GREP_STRINGS' ("Strings to
+search") as a pattern for search, you can set 'LH_GREP_STRINGS' to anything
+grep understands. For example:
+* if you need to get only the changes related to "ssh" OR "su", no matter where
+they occur, alone or together on a line, use:
+
+  LH_GREP_STRINGS="ssh\|su"
+
+* if you need to get only the changes related to "ssh" AND "su" (when they
+occur together on the same line), use:
+
+  LH_GREP_STRINGS="ssh.*su\|su.*ssh"
+
+* if you need to also pass some options to grep (which will be used for
+searching patterns into the new added lines), set them in the
+'LH_GREP_EXTRA_OPTS' variable (or, if you use the dialog interface, in the
+"Extra options for grep" section):
+
+  LH_GREP_EXTRA_OPTS="-F"
+
+If you don't, 'grep' defaults to '-e'.
+Just some examples.
+
+
+
+5.3 Watching full directories ________
+
+Logsend was designed for monitoring files (and search them) and not entire
+directories. However, it is possible to watch directories too, but only with
+the inotify backend, and with these limitations:
+While watching a full directory (with the inotify backend), will be sent only
+the modification events related to the directory and to the files belonging to
+it, and not the lines added to the files. Also, in this case, receiving
+notifications for the changes which occured while logsend wasn't running is not
+possible.
+ 
+* Note: Since the differences between the logsend versions are often
+significant, the differences in the documentation tend to be significant too.
+You should always use the documentation provided with your package.

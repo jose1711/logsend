@@ -1,0 +1,393 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<html>
+<head>
+<title> Logsend - README </title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<meta name="keywords" content="logsend unix linux log analysis email notification file monitor watcher">
+<meta name="description" content="Logsend is a unix daemon for e-mail notification of log file changes, written in bash.">
+<meta name="Author" content="Orveldv">
+<meta name="robots" content="NOARCHIVE, noarchive"> 
+<meta name="Content-Language" CONTENT="english">
+<link href="style.css" rel="stylesheet" type="text/css">
+</head>
+
+<BODY LANG="en-US" DIR="LTR" >
+
+<div class="whole">
+
+<div class="header">
+<!--#include file="header2.html" -->
+</div>
+
+<div class="section">
+<p id="SectionTitle">
+README file for logsend 1.0
+</p>
+
+
+<p>
+Here you can find the complete documentation about installing and using logsend.</p>
+
+
+
+<div class="index">
+<ul>
+<li><q1>1. <a href='#w1'>Requirements </a></q1></li>
+<li><q2>        1.1 <a href='#w1.1'>Bash </a></q2></li>
+<li><q2>        1.2 <a href='#w1.2'>Dialog </a></q2></li>
+<li><q2>        1.3 <a href='#w1.3'>MTA </a></q2></li>
+<li><q2>        1.4 <a href='#w1.4'>Mailx </a></q2></li>
+<li><q2>        1.5 <a href='#w1.5'>Tail </a></q2></li>
+<li><q2>        1.6 <a href='#w1.6'>Awk </a></q2></li>
+<li><q2>        1.7 <a href='#w1.7'>Inotify-tools </a></q2></li>
+</ul><ul>
+
+<li><q1>2. <a href='#w2'>Installation </a></q1></li>
+<li><q2>        2.1 <a href='#w2.1'>All Linux distributions </a></q2></li>
+</ul><ul>
+
+<li><q1>3. <a href='#w3'>Configuration </a></q1>
+<li><q2>        3.1 <a href='#w3.1'>Using the dialog interface </a></q2></li>
+<li><q3>                3.1.1 <a href='#w3.1.1'>Files to watch and e-mail address </a></q3></li>
+<li><q3>                3.1.2 <a href='#w3.1.2'>Send a test e-mail </a></q3></li>
+<li><q3>                3.1.3 <a href='#w3.1.3'>Other settings (optional) </a></q3></li>
+<li><q4>                        3.1.3.1 <a href='#w3.1.3.1'>Strings to search </a></q4></li>
+<li><q4>                        3.1.3.2 <a href='#w3.1.3.2'>E-mail delays </a></q4></li>
+<li><q4>                        3.1.3.3 <a href='#w3.1.3.3'>Backend to use + A word on inotify </a></q4></li>
+<li><q4>                        3.1.3.4 <a href='#w3.1.3.4'>Colour themes </a></q4></li>
+<li><q2>        3.2 <a href='#w3.2'>Manual configuration </a></q2></li>
+
+</ul><ul>
+<li><q1>4. <a href='#w4'>Usage </a></q1></li>
+<li><q2>        4.1 <a href='#w4.1'>Starting logsend </a></q2></li>
+<li><q2>        4.2 <a href='#w4.2'>Automatic startup at boot time </a></q2></li>
+
+</ul><ul>
+<li><q1>5. <a href='#w5'>Tips &amp; Tricks </a></q1></li>
+<li><q2>        5.1 <a href='#w5.1'>Hints for watching various activity </a></q2></li>
+<li><q2>        5.2 <a href='#w5.2'>Searching for multiple patterns in the same file </a></q2></li>
+<li><q2>        5.3 <a href='#w5.3'>Watching full directories </a></q2></li>
+</ul>
+</div>
+
+
+
+
+
+<a name='w1'></a>
+<h2>1. Requirements </h2>
+
+<a name='w1.1'></a>
+<h3>1.1 Bash </h3>
+
+<p class="hft-paras">Since logsend is written in bash, you will need a decent version of it. The oldest bash version used for testing was <B>2.05a.0</B>. </p>
+
+<a name='w1.2'></a>
+<h3>1.2 Dialog</h3>
+
+<p class="hft-paras">Dialog is required only if you want to use the configuration interface. You are strongly advised to use it and install a decent dialog version; the oldest dialog version used for testing was <B>0.9a-20020309a</B>.</p>
+
+<p class="hft-paras">Since logsend will try to send e-mails, you should have these mail-related packages installed (and configured):</p>
+
+<a name='w1.3'></a>
+<h3>1.3 MTA</h3>
+
+<p class="hft-paras">Mail Transport Agent: it can be postfix, qmail, sendmail or other. Probably there is one installed already. If not, get postfix, seems to be the easiest to install.</p>
+
+<a name='w1.4'></a>
+<h3>1.4 Mailx</h3>
+
+<p class="hft-paras">The mail command is usually provided by the mailx package.</p>
+
+<a name='w1.5'></a>
+<h3>1.5 Tail</h3>
+
+<p class="hft-paras">Since tail is part of coreutils it is likely that you have it; but check its version. Old versions of tail make no difference between stdout and stderr. The oldest version used for testing was <B>5.2.1</B>.</p>
+
+<a name='w1.6'></a>
+<h3>1.6 Awk</h3>
+
+<p class="hft-paras">You probably already have it. Type: "awk" and you should see the usage.</p>
+
+<a name='w1.7'></a>
+<h3>1.7 Inotify-tools</h3>
+
+<p class="hft-paras">You will need it only if you want to use the INOTIFY backend. You can get it from here: <a href="http://inotify-tools.sourceforge.net" class="hft-urls" >http://inotify-tools.sourceforge.net</a>.</p>
+
+
+
+<a name='w2'></a>
+<h2>2. Installation</h2>
+
+<a name='w2.1'></a>
+<h3>2.1 All Linux distributions</h3>
+
+<p class="hft-paras">For installing into the default location (/usr/local), or other locations for which a regular user doesn&#39;t have write permission, you have to log in as &#39;root&#39; first. After getting the archive from <a href="http://logsend.sourceforge.net" class="hft-urls" >http://logsend.sourceforge.net</a>, extract it and install logsend:</p>
+
+<p class="hft-paras"><pre>
+tar xzf logsend-x.y.tar.gz
+cd logsend-x.y.tar.gz
+make install
+</pre></p>
+
+<p class="hft-paras">This will install logsend into /usr/local. If you want to use another location, specify it using the ${prefix} variable, for example:</p>
+
+<p class="hft-paras"><pre>prefix=/opt make install</pre></p>
+
+<p class="hft-paras">will install it into /opt/logsend-x.y/</p>
+
+<p class="hft-paras">If you don&#39;t have &quot;make&quot; installed or preffer not to use it, you can call the &quot;install.sh&quot; script directly:</p>
+
+<p class="hft-paras"><pre>./install.sh -i</pre></p>
+
+<p class="hft-paras">Or, for using other location than /usr/local:</p>
+
+<p class="hft-paras"><pre>prefix=/opt ./install.sh -i</pre></p>
+
+<p class="hft-paras">You may want to keep this extracted archive on your filesystem; if you change your mind later and want to uninstall logsend, you will be able to do it this way:</p>
+
+<p class="hft-paras"><pre>prefix=/opt make uninstall</pre>
+Or:
+<pre>prefix=/opt ./install.sh -u </pre></p>
+
+
+
+
+
+<a name='w3'></a>
+<h2>3. Configuration</h2>
+
+<p class="hft-paras">Always remember that each user can run his / her own instance of logsend, so you should configure it as the same user you plan to use it. Also, this user needs read permission on the files to watch; and this is something a regular user usually doesn&#39;t have when it comes about the system&#39;s log files.</p>
+<p>The recommended method of configuration is using the dialog based interface, since it will get you starting quick and easy. However, if you preffer not to use it, skip to the &quot;<a href='#w3.2'>Manual configuration</a>&quot; section. A major benefit of the interface is that if you happen to make a mistake while configuring (typo or other), you will be prompted and can immediately fix it. If you make a mistake during the manual configuration, however, you will be warned when you will try to start logsend. </p>
+
+<a name='w3.1'></a>
+<h3>3.1 Using the dialog interface</h3>
+
+<p class="hft-paras">Fire up the interface:</p>
+
+<p class="hft-paras"><pre>logsend config</pre></p>
+
+<p class="hft-paras">Now go to the first item (&quot;Basic configuration&quot;) and set the files to watch and your e-mail address.</p>
+
+<a name='w3.1.1'></a>
+<h3>3.1.1 Files to watch and e-mail address</h3>
+
+<p class="hft-paras">These are the most important settings: logsend will need to know what files you need it to supervise, and also what is your e-mail address, so that it will be able to send you the notifications. Add the files to the list, one by one, and type their full path. Take your time, once you will be done there won&#39;t be many other things left to do. </p>
+
+<p class="hft-paras">Also make sure you enter your precise e-mail address, the interface will only check its format, but there won&#39;t be any way of knowing about your typos.</p>
+
+<a name='w3.1.2'></a>
+<h3>3.1.2 Send a test e-mail</h3>
+
+<p class="hft-paras">Since you finished setting the above, you should send a test e-mail to make sure you will receive the forthcoming notifications sent by Logsend. Do it now: go to the main menu, item 4. If you received it, you&#39;re done: exit and save the settings (and skip to the &quot;<a href='#w4.1'>Starting logsend</a>&quot; section). But if you didn&#39;t, there are some things you may want to check: </p>
+<ul>
+<li>
+- Did you enter your e-mail address correctly in the &quot;E-mail address&quot; section?
+</li><li>
+- Did you look to the Spam / Bulk / Junk folder of your e-mail account?
+</li><li>
+- Do you have a working MTA (Mail Transport Agent)? I.e., is there installed any package like postfix, qmail or sendmail? If it is, did you configure it properly? You should really pay attention to this; once it is fully functional (and secured), it will be your partner for a lifetime. But is not the purpose of this manual to help you doing it.
+</li><li>
+- Does your local firewall allow outgoing connections on port 25 (SMTP)? Many linux firewalls allow all outgoing connections by default, however, you should make sure this is also your case.
+</li>
+</ul>
+
+<a name='w3.1.3'></a>
+<h3>3.1.3 Other settings (optional)</h3>
+
+<p class="hft-paras">In this section are described some things you can do to tweak logsend&#39;s behaviour. If you&#39;re in a hurry, you can skip it and go to &quot;<a href='#w4.1'>Starting logsend</a>&quot;.</p>
+
+<a name='w3.1.3.1'></a>
+<h3>3.1.3.1 Strings to search</h3>
+
+<p class="hft-paras">While watching a file for changes, you may not be interested in all the lines added to the file, but only in the lines that contain a certain word (or string). For example, you need to watch the /var/log/auth.log file to know who and when logs in, but you are interested only in the remote logins, via ssh; in this case the string to search for is &#39;ssh&#39;, and an e-mail will be sent when lines containing &#39;ssh&#39; will be added to auth.log.</p>
+
+<a name='w3.1.3.2'></a>
+<h3>3.1.3.2 E-mail delays</h3>
+
+<p class="hft-paras">Sometimes, if changes occur too often to a file, you will be bombed with e-mails. Setting a minimum delay between the e-mails to be sent will prevent this from happening. If you don&#39;t specify a delay, the default will be used, which is 10 minutes. The time format for the delay is the one used by &#39;sleep&#39; (50s = 50 seconds; 20m = 20 minutes; 5h = 5 hours; 1d = 1 day). Check the sleep man page for more details.</p>
+
+<a name='w3.1.3.3'></a>
+<h3>3.1.3.3 Backend to use + A word on inotify</h3>
+
+<p class="hft-paras">Logsend can use different backends to detect the changes to the files. With the TAIL backend it detects changes using the &#39;tail&#39; command and analysing its output. It doesn't need any particular kernel version or packages to be installed, so you can always switch to TAIL if you are using an older system or a non-linux kernel. Also, this is recommended for high-activity servers. If you are a home user and you have a recent kernel, you might want to use the INOTIFY backend which saves logsend from the trouble of making checks even if the files to watch didn&#39;t change. The SIMPLE backend will check the files periodically to detect line additions, and the time period between two consecutive checks is the e-mail delay. Don't use it on rotated files.</p>
+
+
+
+
+
+<h2>A word on inotify</h2>
+
+<h3>What is it?</h3> 
+<p class="hft-paras">Inotify is a Linux kernel subsystem that provides file system event notification. See <a href="http://en.wikipedia.org/wiki/Inotify" class="hft-urls" >http://en.wikipedia.org/wiki/Inotify</a> for more details. </p>
+
+<h3>Do you have it? </h3>
+<p class="hft-paras">Chances are that it is built into your kernel and running if the kernel version is &gt;= 2.6.13. To find out if it is compiled into the kernel, do these: </p>
+<pre>zgrep INOTIFY /proc/config.gz </pre>
+<p class="hft-paras">or: </p>
+<pre>grep INOTIFY /boot/your-kernel-config-file. </pre>
+<p class="hft-paras">or, on Gentoo systems: </p>
+<pre>grep INOTIFY /etc/kernels/your-kernel-config-file </pre>
+
+<p class="hft-paras">You should see &#39;CONFIG_INOTIFY=y&#39; </p>
+
+<h3>Is it running? </h3>
+<p class="hft-paras">If /proc/sys/fs/inotify exists, inotify is enabled. In older versions it used a device node, /dev/inotify or /dev/misc/inotify, so you may want to check for that too.</p>
+
+<h3>Using it</h3>
+<p class="hft-paras">Logsend uses the &#39;inotifywait&#39; command, provided by &#39;inotify-tools&#39;, so please install &#39;inotify-tools&#39;. You can get it from here: <a href="http://inotify-tools.sourceforge.net" class="hft-urls" >http://inotify-tools.sourceforge.net</a>.</p>
+<hr>
+
+<a name='w3.1.3.4'></a>
+<h3>3.1.3.4 Colour themes</h3>
+
+<p class="hft-paras">Having different themes available proves to be useful while using the live monitor; if you want to keep an eye continuously on several files, you can have multiple instances of the live monitor up and running in different terminals / tabs, each one having its own colour.</p>
+
+<a name='w3.2'></a>
+<h3>3.2 Manual configuration</h3>
+
+<p class="hft-paras">Ok, so you chose not to use the dialog interface. First you should know that longsed stores its configuration file into your home directory, under <pre>.logsend/${USER}-conf/logsend.conf</pre> If this is the first time you run logsend, you should create this directory:</p>
+
+<p class="hft-paras"><pre>mkdir --parents &nbsp;~/.logsend/${USER}-conf/</pre></p>
+
+<p class="hft-paras">Copy the default configuration file which is located under /usr/local/share/logsend-1.0/logsend.conf.default (if you installed into the default location), to the directory you created and rename it to &#39;logsend.conf&#39;:</p>
+
+<p class="hft-paras"><pre>cp /usr/local/share/logsend-1.0/logsend.conf.default &nbsp;~/.logsend/${USER}-conf/logsend.conf</pre></p>
+
+<p class="hft-paras">Now fire up your preffered text editor and change these variables in &#39;logsend.conf&#39;: &#39;LH_MAIL_ADDRESS&#39;, &#39;LH_FILES&#39;. The file is heavily commented so it shouldn&#39;t be hard to figure out what to do. Optional, you can change these too: &#39;LH_BACKEND&#39;, &#39;LH_MAIL_DELAYS&#39;, &#39;LH_GREP_STRINGS&#39; (or anything else you want).</p>
+
+
+
+
+
+<a name='w4'></a>
+<h2>4. Usage</h2>
+
+<a name='w4.1'></a>
+<h3>4.1 Starting logsend</h3>
+
+<p class="hft-paras">Once you&#39;re finished with the configuration, it&#39;s time to start logsend. Just type:</p>
+
+<p class="hft-paras"><pre>logsend start</pre></p>
+
+<p class="hft-paras">There are also other actions beside &#39;start&#39;, like &#39;stop&#39;, &#39;restart&#39; and &#39;status&#39;. Use them to control it.</p>
+
+<a name='w4.2'></a>
+<h3>4.2 Automatic startup at boot time</h3>
+
+<p class="hft-paras">Starting at boot time is possible if you configured logsend as the root user. Logsend doesn&#39;t come with an init script, since it behaves like an init script itself. You should link it to the proper runlevel. Eg.:</p>
+
+<p class="hft-paras">* on Gentoo:</p>
+
+<p class="hft-paras"><pre>echo &quot;/usr/local/bin/logsend start&quot; &gt;&gt; /etc/conf.d/local.start
+rc-update add local default</pre></p>
+<p class="hft-paras">This will start logsend in the default runlevel.</p>
+
+<p class="hft-paras">* on Debian:</p>
+
+<p class="hft-paras"><pre>
+echo "/usr/local/bin/logsend start" > /etc/init.d/logsend
+chmod 755 /etc/init.d/logsend
+ln -s /etc/init.d/logsend /etc/rcS.d/S85logsend
+</pre></p>
+<p class="hft-paras">This will start logsend in all the runlevels.   </p>
+
+<p class="hft-paras">* other systems</p>
+
+<p class="hft-paras"><pre>
+echo "/usr/local/bin/logsend start" > /etc/init.d/logsend
+chmod 755 /etc/init.d/logsend
+ln -s /etc/init.d/logsend /etc/rc5.d/S85logsend
+</pre> </p>
+<p class="hft-paras">This will start logsend in runlevel 5 (graphical / X)</p>
+
+<p class="hft-paras">It will start no matter if you had a power failure or accidentaly pushed the &#39;Reset&#39; button; logsend doesn&#39;t use lock files to keep track of its status.</p>
+
+
+
+
+
+<a name='w5'></a>
+<h2>5. Tips &amp; Tricks</h2>
+
+<a name='w5.1'></a>
+<h3>5.1 Hints for watching various activity</h3>
+
+<p class="hft-paras">Below are some examples you can use to watch certain servers&#39; activity. They are only guidelines, your servers might keep logs to other files than those mentioned. They are written for the case of manual configuration, but if you use the dialog interface, it will be even easier; &#39;LH_FILES&#39; reffers to the &quot;Files to watch&quot;; &#39;LH_GREP_STRINGS&#39; reffers to the &quot;Strings to search&quot;; &#39;LH_MAIL_DELAYS&#39; reffers to the &quot;E-mail delays&quot;.</p>
+
+<p class="hft-paras">* for watching ssh logs:</p>
+<ul>
+<li>LH_FILES=&quot;/var/log/auth.log&quot;</li>
+<li>LH_GREP_STRINGS=&quot;ssh&quot;</li>
+</ul>
+<p class="hft-paras">* for watching apache-ssl logs:</p>
+<ul>
+<li>LH_FILES=&quot;/var/log/apache-ssl/access.log&quot;</li>
+<li>LH_GREP_STRINGS=&quot;.&quot;</li>
+</ul>   
+<p class="hft-paras">* for watching mail logs (postfix) :</p>
+<ul>
+<li>LH_FILES=&quot;/var/log/mail.log&quot;
+        (on some systems it may be &quot;/var/log/mail/mail.log&quot;)</li>
+<li>LH_GREP_STRINGS=&quot;postfix&quot; (for watching only the mail traffic)</li>
+<li>LH_GREP_STRINGS=&quot;.&quot; (for watching all the mail activity)</li>
+<li>LH_MAIL_DELAYS=&quot;1d&quot; (this way you will get a daily e-mail.
+        Note that the mail-send activity of logsend will 
+        be included in the mail logs too, so setting a 
+        short time between checks will make you receive 
+        nothing else but the logsend activity itself.)</li>
+</ul>
+<p class="hft-paras">* for watching ssh logs and su sessions:</p>
+<ul>
+<li>LH_FILES=&quot;/var/log/auth.log&quot;</li>
+<li>LH_GREP_STRINGS=&quot;ssh\|su&quot;</li>
+</ul>
+<p class="hft-paras">* for watching all the authentication activity (logins: xdm, su, 
+  ssh, pam, ... )</p>
+<ul>
+<li>LH_FILES=&quot;/var/log/auth.log&quot;</li>
+<li>LH_GREP_STRINGS=&quot;.&quot;</li>
+</ul>
+
+<a name='w5.2'></a>
+<h3>5.2 Searching for multiple patterns in the same file</h3>
+
+<p class="hft-paras">As logsend calls the grep command having &#39;LH_GREP_STRINGS&#39; (&quot;Strings to search&quot;) as a pattern for search, you can set &#39;LH_GREP_STRINGS&#39; to anything grep understands. For example:</p>
+
+<p class="hft-paras">* if you need to get only the changes related to &quot;ssh&quot; OR &quot;su&quot;, no matter where they occur, alone or together on a line, use:</p>
+<ul>
+<li>LH_GREP_STRINGS=&quot;ssh\|su&quot;</li>
+</ul>
+<p class="hft-paras">* if you need to get only the changes related to &quot;ssh&quot; AND &quot;su&quot; (when they occur together on the same line), use:</p>
+<ul>
+<li>LH_GREP_STRINGS=&quot;ssh.*su\|su.*ssh&quot;</li>
+</ul>
+<p class="hft-paras">* if you need to also pass some options to grep (which will be used for searching patterns into the new added lines), set them in the &#39;LH_GREP_EXTRA_OPTS&#39; variable (or, if you use the dialog interface, in the &quot;Extra options for grep&quot; section):</p>
+<ul>
+<li>LH_GREP_EXTRA_OPTS=&quot;-F&quot;</li>
+</ul>
+<p class="hft-paras">If you don&#39;t, &#39;grep&#39; defaults to &#39;-e&#39;.</p>
+
+<p class="hft-paras">Just some examples.</p>
+
+<a name='w5.3'></a>
+<h3>5.3 Watching full directories</h3>
+
+<p class="hft-paras">Logsend was designed for monitoring files (and search them) and not entire directories. However, it is possible to watch directories too, but only with the inotify backend, and with these limitations:</p>
+
+<p class="hft-paras">While watching a full directory (with the inotify backend), will be sent only the modification events related to the directory and to the files belonging to it, and not the lines added to the files. Also, in this case, receiving notifications for the changes which occured while logsend wasn&#39;t running is not possible.</p>
+
+<p>&nbsp;</p>
+
+<p>* Note: Since the differences between the logsend versions are often significant, the differences in the documentation tend to be significant too. You should always use the documentation provided with your package.</p>
+
+</div>
+
+<div class="footer">
+<!--#include file="footer.html" -->
+</div>
+
+</div>
+</body>
+</html>
+

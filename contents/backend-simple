@@ -1,0 +1,141 @@
+#!/bin/bash
+# $Id: backend-simple,v 1.2 2007/04/06 09:19:41 orveldv Exp $
+#
+# Logsend watches files and mails the additions to your 
+# e-mail address.
+#
+# Logsend is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation; either version 2 of
+# the License, or (at your option) any later version.
+#
+# Logsend is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public 
+# License along with this program; if not, write to the Free 
+# Software Foundation, Inc.,51 Franklin Street, Fifth Floor, 
+# Boston, MA 02110-1301 USA.
+#
+#
+# Copyright: 	Daniel Butzu (Orveldv) 
+# Mailto: 	orveldv at users dot sourceforge dot net
+# Homepage: 	http://logsend.sourceforge.net
+
+
+
+
+
+	# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	# Here begin the functions for the SIMPLE backend
+
+	# function for checking if the log file has grown and perform the action
+	lh_check() {
+		# is it still readable?
+		[ ! -r "${LH_LOG_FILE}" ] && return
+
+		# still a regular file? no fifo? no directory?
+		[ ! -f "${LH_LOG_FILE}" ] && return
+
+		# lets write the new lines to a file
+		tail -n +${LH_LINES} "${LH_LOG_FILE}" > "${LH_LOG_FILE_CUT}"
+
+		# lets see how many lines were added (new)
+		export LINES_NEW=$(wc -l "${LH_LOG_FILE_CUT}" | awk '{ print $1 }')
+
+		# move the file with grepped lines and send it.
+		lh_move() {
+			if [ "${LH_BACKEND}" = "inotify" ]
+			then
+				if ( set -o noclobber; echo > "${LH_LOCK_SLEEP}") 2> /dev/null 
+				then
+					# the sleep helps us colect more lines and events, bot for files and directories.
+					sleep 5s
+					touch "${LH_LOCK_MV}"
+						mv "${LH_LOG_FILE_TO_SEND}" "${LH_LOG_FILE_TO_SEND_MV}"
+						lh_action
+						rm "${LH_LOG_FILE_TO_SEND_MV}"
+					rm "${LH_LOCK_MV}"
+
+					# we will call again the whole check fnc because we might 
+					# have changes to send, but hang waiting for a new event.
+					lh_recheck() {
+						sleep "${LH_LOG_SLEEP}"
+						rm "${LH_LOCK_SLEEP}"
+						# we always make sure on the next checks to look at
+						# the real file and not the deleted .toobig.
+						[ "${LH_INOTIFY_ISDIR}" = "1" ] && export LH_LOG_FILE="${LH_DIR_OUTFILE}"
+						lh_inotify_file_check
+					}
+					lh_recheck &
+				fi
+			elif [ "${LH_BACKEND}" = "simple" ]
+			then
+					mv "${LH_LOG_FILE_TO_SEND}" "${LH_LOG_FILE_TO_SEND_MV}"
+					lh_action
+					rm "${LH_LOG_FILE_TO_SEND_MV}"
+			fi
+		}
+
+		# check if the log file has grown
+		if [ ${LINES_NEW} -ge 1 ] 
+		then 
+			# Lines were added, not grepped yet.
+			# increase the line counter
+			export LH_LINES=$((${LH_LINES}+${LINES_NEW}))
+			# write down the new line counter; we'll use it both for the next 
+			# call of this fnc (only by inotify(FILE)) and the $LH_GET_MEANTIME.
+			echo "${LH_LINES}" > "${LH_WRITTEN_COUNTER}"
+
+			# grep exits 1 if the string wasn't found; the exit status of disk-write is 
+			# also needed and we won't write to disk if nothing was found (exit subshell).
+			lh_do_grep() {
+				if [ "${LH_LIVE_MON}" != "1" ] ; then
+					grep --no-filename "${LH_GREP_EXTRA_OPTS}" "${LH_GREP}" "${LH_LOG_FILE_CUT}" 
+				else
+					grep --no-filename "${LH_GREP_EXTRA_OPTS}" "${LH_GREP}" "${LH_LOG_FILE_CUT}" | fold -w "${LH_TEXT_WIDTH}" 
+				fi
+				[ "$?" != "0" ] && exit 1
+				# for some reason we still need this:
+				return 0
+			}
+			lh_write_diffs() {
+				# don't write to a file which is being sent.
+				while [ -r "${LH_LOCK_MV}" ] ; do
+					sleep 0.2s
+				done
+
+				lh_do_grep >> "${LH_LOG_FILE_TO_SEND}" 
+				if [ "${LH_LIVE_MON}" != "1" ] ; then
+					lh_move &
+				fi
+			}
+			( lh_write_diffs )
+		fi
+	}
+
+
+
+	lh_call_simple() {
+
+			lh_get_meantime_pre
+
+			while true
+			do
+				# check if the log file has grown
+				# and perform the proper action
+				lh_check	
+
+				sleep "${LH_LOG_SLEEP}"
+			done 
+	}
+
+
+
+
+
+# -------------------------------------
+# prefix section
+

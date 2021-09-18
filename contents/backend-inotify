@@ -1,0 +1,289 @@
+#!/bin/bash
+# $Id: backend-inotify,v 1.2 2007/04/06 09:19:35 orveldv Exp $
+#
+# Logsend watches files and mails the additions to your 
+# e-mail address.
+#
+# Logsend is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation; either version 2 of
+# the License, or (at your option) any later version.
+#
+# Logsend is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public 
+# License along with this program; if not, write to the Free 
+# Software Foundation, Inc.,51 Franklin Street, Fifth Floor, 
+# Boston, MA 02110-1301 USA.
+#
+#
+# Copyright: 	Daniel Butzu (Orveldv) 
+# Mailto: 	orveldv at users dot sourceforge dot net
+# Homepage: 	http://logsend.sourceforge.net
+
+
+
+
+
+	# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	# Here begin the functions for the INOTIFY backend
+
+	lh_inotify_read() {
+		while true
+		do
+			read LH_INOTIFY_READ
+
+			if [ "${LH_INOTIFY_ISDIR}" = "1" ]
+			then
+				echo "${LH_INOTIFY_READ}" >> "${LH_DIR_OUTFILE}"
+			fi
+
+			# checking here instead of in lh_inotify_file_check seems to be faster in cases of high activity.
+			# well use "grep -E" (or egrep) since is the fastest ever.
+			# echo "${LH_INOTIFY_READ}" | grep -q -e "IGNORE\|DELETE_SELF\|MOVE_SELF" && { lh_inotify_restart ; exit 0 ; }
+			echo "${LH_INOTIFY_READ}" | grep -q -E "_SELF" && { lh_inotify_restart ; exit 0 ; }
+
+			# Oops, grep is faster than bash.
+			# if [ "${LH_INOTIFY_READ}" != "${LH_INOTIFY_READ#*DELETE_SELF}" ] || [ "${LH_INOTIFY_READ}" != "${LH_INOTIFY_READ#*MOVE_SELF}" ]
+			# then
+			#	lh_inotify_restart ; exit 0 ;
+			# fi
+			# [ "${LH_INOTIFY_READ}" != "${LH_INOTIFY_READ#*_SELF}" ] && { lh_inotify_restart ; exit 0 ; }
+
+			lh_inotify_file_check & 
+		done
+	}
+
+
+
+	lh_inotify_restart() {
+		# now get all the inotifywait commands (exact match with ours).
+		ORV_INOTIFY_PIDS=$(pgrep -f -x "inotifywait -m".+"${LH_LOG_FILE}" -u "${USER}" -d " ")
+
+		if [ "${LH_LIVE_MON}" != "1" ]
+		then
+			ORV_ALIVE_PROCS=$(pgrep -f "${ORV_BASENAME} alive" -u "${USER}" -d " ")
+		else
+			ORV_ALIVE_PROCS=$(pgrep -f -x "/bin/bash ./logsend-config" -u "${USER}" -d " ")
+		fi
+
+		# for each alive proc
+		for ORV_PARENT in ${ORV_ALIVE_PROCS} ; do
+			# get its children
+			ORV_CHILDREN="$(pgrep -P ${ORV_PARENT})"
+			# for each child
+			for ORV_ONE_CHILD in ${ORV_CHILDREN} ; do
+				# see if it is our inotifywait command
+				for ORV_ONE_INOTIFY in ${ORV_INOTIFY_PIDS} ; do
+					if [ "${ORV_ONE_INOTIFY}" = "${ORV_ONE_CHILD}" ]
+					then
+						# it is, kill all his brothers.
+						for ORV_ONE_CHILD_TO_KILL in ${ORV_CHILDREN} ; do
+							while kill -0 ${ORV_ONE_CHILD_TO_KILL} > /dev/null 2>&1 ; do
+								# kill this child
+								kill ${ORV_ONE_CHILD_TO_KILL} > /dev/null 2>&1
+							done
+						done
+					fi
+				done
+			done
+		done
+		# only after both this inotifywait and the read loop were killed
+		# the main loop will continue and: check if the file appeared, 
+		# perform check on it and launch a new inotifywait.
+	}
+
+
+
+	lh_inotify_file_check() {
+
+		# we need these tests in case of file deletion 
+		# (but they don't make sense while watching dirs since then is checked 
+		# LH_DIR_OUTFILE); also this enssures e-mail notif. after dir deletion.
+		if [ "${LH_INOTIFY_ISDIR}" != "1" ]
+		then
+			# is it still readable?
+			[ ! -r "${LH_LOG_FILE}" ] && return
+			# still a regular file? no fifo? no directory?
+			[ ! -f "${LH_LOG_FILE}" ] && return
+		fi
+
+		# lock ckecking.
+		# 1. if there is a waiting fnc. already, exit.
+		( set -o noclobber; echo > "${LH_LOCK_INOTIFY}") 2> /dev/null || exit 0
+
+		# 2. wait if exists a check fnc. & announce lh_check started.
+		while true
+		do
+			( set -o noclobber; echo > "${LH_LOCK_CHECK}") 2> /dev/null && break
+		done
+
+		# 3. allow future fncs. to wait.
+		rm  "${LH_LOCK_INOTIFY}"
+
+		# this is needed in cases when lh_check is launched always in the
+		# background and it can't pass vars to the future instances of itself;
+		# we don't need it for SIMPLE, but we needed it for INOTIFY.
+		if [ -r "${LH_WRITTEN_COUNTER}" ]
+		then
+			export LH_LINES=$(cat "${LH_WRITTEN_COUNTER}")
+		else
+			export LH_LINES="1"
+		fi
+
+		if [ "${LH_INOTIFY_ISDIR}" = "1" ]
+		then
+			# while watching a dir, lets not have a huge events file.
+			if [ "${LH_LINES}" -gt "20" ]
+			then
+				# move the file no to be appended anymore; 
+				mv "${LH_DIR_OUTFILE}" "${LH_DIR_OUTFILE}.toobig"
+				# pass this to lh_check
+				export LH_LOG_FILE="${LH_DIR_OUTFILE}.toobig"
+				lh_check
+					# after moving the too big outfile and calling lh_check, we should say
+					# that the new lines number is 1 (for the new outfile). 
+					rm "${LH_DIR_OUTFILE}.toobig" 
+					LH_LINES=1
+					echo "${LH_LINES}" > "${LH_WRITTEN_COUNTER}"
+			else
+				# pass this to lh_check
+				export LH_LOG_FILE="${LH_DIR_OUTFILE}"
+				lh_check
+			fi
+		else
+			# check for truncation; the light style.
+			LH_SIZE=$(du -b "${LH_LOG_FILE}" | awk '{ print $"1" }')
+			LH_SIZE_OLD=$(cat "${LH_WRITTEN_SIZE}")
+			[ "${LH_SIZE}" -lt "${LH_SIZE_OLD}" ] && LH_LINES="1"
+
+			echo "${LH_SIZE}" > "${LH_WRITTEN_SIZE}"
+			lh_check
+		fi
+
+		# when called again after a sleep, we get here without lh_move so do it now.
+		if [ "${LH_LIVE_MON}" != "1" ] && [ -s "${LH_LOG_FILE_TO_SEND}" ] ; then
+			lh_move &
+		fi
+
+		# 4. announce lh_check ended.
+		rm "${LH_LOCK_CHECK}"
+	}
+
+
+
+	lh_call_inofile() {
+			export LH_INOTIFY_FILE_COMMAND="inotifywait -m ${LH_INOTIFY_FILE_OPTS}"
+
+				# &FUTURE: 
+				# all the files could be passed to the same inotifywait command.
+				# But what if in log rotation a file gets deleted, and we need to restart
+				# the whole inotifywait command?
+				# Won't events be missed for the other files while restarting? (Probably
+				# not if the first thing after restart is a check for each one).
+				# + the monitoring of directories should never happen with the same
+				# inotifywait command since setting up watches really takes a while (and
+				# this is a remaining argument and I still don't feel comfortable with a 
+				# whole re-watch of all files just because one of them got deleted.
+
+				export LH_BACKEND
+				# should always be set; other things rely on it.
+				export LH_INOTIFY_ISDIR="0"
+
+				lh_get_meantime_pre
+
+				# wipe any existing grepped lines.
+				[ "${LH_GET_MEANTIME}" != "1" ] && rm -f "${LH_LOG_FILE_TO_SEND}"
+
+				# size comparison for truncation has meaning only from one check to 
+				# another, and not between sessions (ok maybe between sessions too,
+				# but in lh_get_meantime_pre, not here). We do calculate it now, 
+				# maybe the very first event will be truncation :-o
+				LH_SIZE=$(du -b "${LH_LOG_FILE}" | awk '{ print $"1" }')
+				echo "${LH_SIZE}" > "${LH_WRITTEN_SIZE}"
+
+				while true
+				do
+					while [ ! -r "${LH_LOG_FILE}" ]
+					do
+						# in case it got deleted, reset the counters and
+						# keep checking.
+						echo "1" > "${LH_WRITTEN_COUNTER}"
+						sleep 1s
+						continue
+					done
+
+					# normally we would perform the check after the event but we 
+					# put it first, to get the meantime changes without waiting.
+					# Also, this gets the changes when inotifywait reinitializes.
+					lh_inotify_file_check &
+
+					# lets hide stderr, no need to see Terminated when switching.
+					exec 6>&2 ; exec 2> /dev/null
+
+					# monitor events. 
+					eval "${LH_INOTIFY_FILE_COMMAND} ${LH_LOG_FILE} 2>/dev/null" | lh_inotify_read
+
+					exec 2>&6 6>&-
+				done
+				exit 0
+	}
+
+
+	lh_call_inodir() {
+
+			export LH_INOTIFY_DIR_COMMAND="inotifywait -m ${LH_INOTIFY_DIR_OPTS}"
+
+				export LH_BACKEND
+				# should always be set; other things rely on it.
+				export LH_INOTIFY_ISDIR="1"
+
+				# needed for lh_get_meantime_pre's wc
+				touch "${LH_DIR_OUTFILE}"
+
+				lh_get_meantime_dir() {
+					local LH_LOG_FILE="${LH_DIR_OUTFILE}"
+					lh_get_meantime_pre
+				}
+				[ "${LH_LIVE_MON}" != "1" ] && lh_get_meantime_dir
+
+
+				# wipe any existing grepped lines (but not for the live monitor - it will crash.
+				if [ "${LH_GET_MEANTIME}" != "1" ] && [ "${LH_LIVE_MON}" != "1" ] ; then
+					rm -f "${LH_LOG_FILE_TO_SEND}"
+				fi
+
+				while true
+				do
+					while [ ! -r "${LH_LOG_FILE}" ]
+					do
+						sleep 1s
+						continue
+					done
+
+					# normally we would perform the check after the event but we 
+					# put it first, to get the meantime changes without waiting.
+					# Also, this gets the changes when inotifywait reinitializes.
+					lh_inotify_file_check &
+
+					# lets hide stderr, no need to see Terminated when switching.
+					exec 6>&2 ; exec 2> /dev/null
+
+					# monitor events. 
+					eval "${LH_INOTIFY_DIR_COMMAND} ${LH_LOG_FILE} 2>/dev/null" | lh_inotify_read
+
+					exec 2>&6 6>&-
+				done
+				exit 0
+	}
+
+
+
+
+
+# -------------------------------------
+# prefix section
+
